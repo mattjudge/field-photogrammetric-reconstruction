@@ -1,6 +1,10 @@
 .idea
 *.pyc
 old
+*.npy
+*.pickle
+*.png
+*.gif
 
 # Windows image file caches
 Thumbs.db

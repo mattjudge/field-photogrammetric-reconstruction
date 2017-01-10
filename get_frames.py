@@ -19,9 +19,13 @@ def get_frame_number_at_seconds(t):
     return t*fps
 
 
+def save_frame_at_seconds(t):
+    save_frame_number(get_frame_number_at_seconds(t))
+
+
 if __name__ == "__main__":
-    save_frame_number(10700)
-    save_frame_number(10701)
-    save_frame_number(10702)
-    save_frame_number(10703)
-    #get_frame_number_at_seconds(214)
+    # save_frame_number(9909)
+    # save_frame_at_seconds(7*60+55)
+    save_frame_number(23752)
+    save_frame_number(23754)
+    save_frame_number(23756)
