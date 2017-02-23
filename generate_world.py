@@ -57,16 +57,25 @@ def getProjections(K, R, t):
 
 
 def genWorld(vel):
-    imagesize = vel.shape
-    shapex = imagesize[2]
-    shapey = imagesize[1]
+    origshape = vel[0].shape
+    origshapey, origshapex = origshape
+    vel[1] = vel[1].clip(-1, 0)
 
-    X, Y = np.meshgrid(np.arange(shapex), np.arange(shapey))
+    X, Y = np.meshgrid(np.arange(origshapex), np.arange(origshapey))
 
     # velocity vectors map pixels in f2 to their locations in f1
-    u1shaped = X + vel[0]*shapex
-    v1shaped = Y + vel[1]*shapey
+    u1shaped = X + vel[0]*origshapex
+    v1shaped = Y + vel[1]*origshapey
     u2shaped, v2shaped = X, Y
+
+    # crop the edges to ensure good data points (otherwise E becomes unstable)
+    crop = 50
+    u1shaped = u1shaped[crop:-crop, crop:-crop]
+    v1shaped = v1shaped[crop:-crop, crop:-crop]
+    u2shaped = u2shaped[crop:-crop, crop:-crop]
+    v2shaped = v2shaped[crop:-crop, crop:-crop]
+    imagesize = u1shaped.shape
+    shapey, shapex = imagesize
 
     u1 = u1shaped.flatten()
     v1 = v1shaped.flatten()
@@ -82,61 +91,48 @@ def genWorld(vel):
     fku = 1883  # estimated
     # fku = 1700
 
-    K = np.array([[fku,     0, shapex//2],
-                  [0,     fku, shapey//2],
-                  [0,       0,         1]])
+    K = np.array([[fku,     0, origshapex//2],
+                  [0,     fku, origshapey//2],
+                  [0,       0,             1]])
 
     # E, mask = cv2.findEssentialMat(w1.transpose(), w2.transpose(), 2000, (shapey//2, shapex//2))
     E, mask = cv2.findEssentialMat(w1.transpose(), w2.transpose(), K)
     print("E", E)
+    # print("mask", mask.T)
+    # print(np.sum(mask), ":", mask.size)
+    # print(mask.size - np.sum(mask))
+    # print((mask.size - np.sum(mask)) / mask.size)
 
-    # R, t = getRandT(E)
-    # P1, P2 = getProjections(K, R, t)
-    # print("P1", P1)
-    # print("P2", P2)
-
-    # 4 possible:  [R_1, t], [R_1, -t], [R_2, t], [R_2, -t]
-    # R2b, R1b, tb = cv2.decomposeEssentialMat(E2)
-
-    R1, R2, t = cv2.decomposeEssentialMat(E)
-    print("R1", R1)
-    print("R2", R2)
-    print("t", t)
-
-    ## an attempt to choose the correct rotation matrix
-    ## TODO: work out the maths behind it
-    # we want R2 to be close to the identity matrix?
-    if np.linalg.norm(np.eye(3) - np.abs(R1)) < np.linalg.norm(np.eye(3) - np.abs(R2)):
-        R1, R2 = R2, R1
-
-    # P1, P2 = getProjections(K, R1, t)
-    # P1, P2 = getProjections(K, R1, -t)
-    P1, P2 = getProjections(K, R2, t)  # appears correct?, light
-    # P1, P2 = getProjections(K, R2, -t) # appears correct, dark
-
+    print("recovering pose")
+    # retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=mask)
+    retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=None)
+    P1, P2 = getProjections(K, R, t)
+    # print("mask", mask.T)
+    # print(np.sum(mask), ":", mask.size)
+    # print(mask.size - np.sum(mask))
+    # print((mask.size - np.sum(mask)) / mask.size)
 
     print("triangulating vertices")
-    finalshape = (shapey, shapex)
     world = cv2.triangulatePoints(P2.astype(float), P1.astype(float), w2.astype(float), w1.astype(float))
     # world = cv2.triangulatePoints(P, P2, w1, w2)  # crashes, bug in opencv
     print("triangulated.")
+    # world[:, mask.transpose()] = float('nan')
 
     world /= world[-1,:]
-    # print(world)
 
-    check1 =P1.dot(world[:,3])
+    check1 = P1.dot(world[:, world.shape[1]//4])
     check1 /= check1[-1]
-    print("check", check1, w1[:,3])
+    print("check", check1, w1[:, world.shape[1]//4])
 
-    check2 =P2.dot(world[:,3])
+    check2 = P2.dot(world[:, world.shape[1]//4])
     check2 /= check2[-1]
-    print("check", check2, w2[:,3])
+    print("check", check2, w2[:, world.shape[1]//4])
 
     print("world shape", world.shape)
 
-    return world[:-1,:], finalshape
+    return world[:-1,:], imagesize
 
-    
+
 def align_point_cloud_with_xy(cloud):
     # regular grid covering the domain of the data
     X, Y = np.meshgrid(np.arange(-0.5, 0.5, 0.05), np.arange(-0.5, 0.5, 0.05))
@@ -241,9 +237,9 @@ def generate_world(fname1, fname2, visual=True, crop=32):
 
     world = align_point_cloud_with_xy(world)
 
-    X = world[0, :].reshape(shape)[crop:-crop:, crop:-crop:]
-    Y = world[1, :].reshape(shape)[crop:-crop:, crop:-crop:]
-    Z = world[2, :].reshape(shape)[crop:-crop:, crop:-crop:]
+    X = world[0, :].reshape(shape)#[shape[0]//2:, :]#[crop:-crop, crop:-crop]
+    Y = world[1, :].reshape(shape)#[shape[0]//2:, :]#[crop:-crop, crop:-crop]
+    Z = world[2, :].reshape(shape)#[shape[0]//2:, :]#[crop:-crop, crop:-crop]
 
     if visual:
         # visualise_world_visvis(X, Y, Z)
@@ -320,11 +316,11 @@ if __name__ == "__main__":
     # generate_world('frame9909', 'frame9912')
     # generate_world('frame9912', 'frame9915')
     # generate_world('frame9915', 'frame9918')
-    # generate_world('frame9918', 'frame9921')
-    # generate_world('frame9921', 'frame9924')
-    # generate_world('frame9924', 'frame9927') # ok
+    generate_world('frame9918', 'frame9921')
+    # generate_world('frame9921', 'frame9924')  # bad
+    # generate_world('frame9924', 'frame9927')
     # generate_world('frame9927', 'frame9930')
 
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909'))
-    generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915'))
+    # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915'))
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915', 'frame9918'))
