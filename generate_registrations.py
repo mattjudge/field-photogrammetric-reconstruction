@@ -1,71 +1,77 @@
 #!/usr/bin/env python
 
-from __future__ import division, print_function
-
 import logging
 
-from matplotlib.pyplot import *
 import numpy as np
 import cv2
-
 import pickle
 
 from dtcwt.numpy import Transform2d
-from dtcwt.registration import *
+import dtcwt.registration as reg
+
+import get_frames
 
 logging.basicConfig(level=logging.INFO)
-
 
 def take_transform(frame):
     trans = Transform2d()
     return trans.forward(frame, nlevels=7)
 
 
-def load_transform_frame(fname):
+def load_frame(fname):
+    path = './data/%s.png' % fname
+    img = cv2.imread('./data/%s.png' % fname)
+    if img is None:
+        # generate frame from video
+        # TODO: MAKE THIS A GENERIC PROCESS
+        img = get_frames.get_frame_number(int(fname[-4:]))
+    return img
+
+
+
+def load_transform_frame(fname, cache=False):
     logging.info('Taking transform')
     path = './data/transform_%s.pickle' % fname
     try:
         # tform = np.load(path)
         with open(path, 'rb') as fileob:
             tform = pickle.load(fileob)
-    except IOError:
-        img = cv2.imread('./data/%s.png' % fname)
-        frame = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    except (IOError, FileNotFoundError) as e:
+        frame = cv2.cvtColor(load_frame(fname), cv2.COLOR_BGR2GRAY)
         tform = take_transform(frame)
-
-        with open(path, 'wb') as fileob:
-            pickle.dump(tform, fileob)
-        # np.save(path, tform)
+        if cache:
+            with open(path, 'wb') as fileob:
+                pickle.dump(tform, fileob)
+            # np.save(path, tform)
     return tform
 
 
-def load_flow(fname1, fname2):
+def load_flow(fname1, fname2, cache=True):
     logging.info('Finding flow')
     path = './data/flow_%s_%s.npy' % (fname1, fname2)
     try:
         flow = np.load(path)
-    except IOError:
-        flow = estimatereg(load_transform_frame(fname1), load_transform_frame(fname2))
-        np.save(path, flow)
+    except (IOError, FileNotFoundError) as e:
+        flow = reg.estimatereg(load_transform_frame(fname1), load_transform_frame(fname2))
+        if cache:
+            np.save(path, flow)
     return flow
 
 
-def load_velocity_fields(fname1, fname2, shape=None):
+def load_velocity_fields(fname1, fname2, shape=None, cache=False):
+    # cache is off by default, because of large file sizes, and low computation expense
     logging.info('Computing velocities')
     if shape is None:
-        shape = cv2.imread('./data/%s.png' % fname1).shape[:2]
+        shape = load_frame(fname1).shape[:2]
     path = './data/velocities_%s_%s.npy' % (fname1, fname2)
     try:
         vels = np.load(path)
-    except IOError:
-        vels = velocityfield(load_flow(fname1, fname2), shape, method='nearest')
-        np.save(path, vels)
+    except (IOError, FileNotFoundError) as e:
+        vels = np.array(reg.velocityfield(load_flow(fname1, fname2), shape, method='nearest'))
+        if cache:
+            np.save(path, vels)
     return vels
 
 
 if __name__ == '__main__':
-    # estimatereg(load_transform_frame('frame10701'), load_transform_frame('frame10701'))
-    # print(load_transform_frame('frame10700'))
-    load_velocity_fields('frame10700', 'frame10701')
-    load_velocity_fields('frame10700', 'frame10702')
-    load_velocity_fields('frame10700', 'frame10703')
+    load_velocity_fields('frame9900', 'frame9903')

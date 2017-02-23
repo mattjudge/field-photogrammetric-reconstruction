@@ -1,6 +1,7 @@
 .idea
 *.pyc
 old
+old2
 *.npy
 *.pickle
 *.png
