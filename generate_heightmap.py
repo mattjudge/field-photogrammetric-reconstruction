@@ -499,7 +499,7 @@ def gen_actual(fname1, fname2):
 
 def new_algo(fname1, fname2):
 
-    savenm = '%s_%s_newalgo.png' % (fname1, fname2)
+    savenm = '_%s_%s_newalgo.png' % (fname1, fname2)
     tvxs, tvys = generate_registrations.load_velocity_fields(fname1, fname2)
     shape = tvxs.shape
 
@@ -511,11 +511,16 @@ def new_algo(fname1, fname2):
     vxs = tvxs * shape[1]
     vys = tvys * shape[0]
 
-    m = 0.2  # distance drone has moved (scaling factor)
+    h_estimate = 10  # set to 0 to get displacement from drone
+
+    final_trim = 1  # number of pixels to trim from edge of outputs
+
+    # m = 0.2  # distance drone has moved (scaling factor)
     # theta1 = np.deg2rad(40)
-    # theta2 = np.deg2rad(82.7)
-    theta1 = np.deg2rad(40)
-    theta2 = np.deg2rad(72)
+    # theta2 = np.deg2rad(72)
+    m = 0.5  # distance drone has moved (scaling factor)
+    theta1 = np.deg2rad(20)
+    theta2 = np.deg2rad(80)
     aov = theta2 - theta1
     # theta1 = 0  # offset from vertical to innermost viewing angle
     # aov = 2.71  # angle of view
@@ -540,9 +545,9 @@ def new_algo(fname1, fname2):
     e1 =  angles
     e2 = shiftedangles
     # e1, e2 = e2, e1
-    d = -m * np.cos(e1) * np.cos(e2) / (np.cos(e1)*np.sin(e2) - np.sin(e1)*np.cos(e2))
+    d = m * np.cos(e1) * np.cos(e2) / np.sin(e1-e2)
     d = -d  # calc'd dist is from drone (downwards direction)
-    p = -m * np.sin(e1) * np.cos(e2) / (np.cos(e1)*np.sin(e2) - np.sin(e1)*np.cos(e2))
+    p = m * np.sin(e1) * np.cos(e2) / np.sin(e1-e2)
     # d = angles
     # print(Y)
     # print(angles)
@@ -559,21 +564,22 @@ def new_algo(fname1, fname2):
     frame = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     pylab.figure()
-    pylab.imshow(frame[50:-50, 50:-50])#, interpolation='none', cmap=pylab.cm.hot, vmin=-4, vmax=4)
+    pylab.imshow(frame[final_trim:-final_trim, final_trim:-final_trim])#, interpolation='none', cmap=pylab.cm.hot, vmin=-4, vmax=4)
     pylab.colorbar()
     pylab.title('frame %s' % fname1)
     pylab.savefig('frame_%s' % savenm)
 
 
     pylab.figure()
-    pylab.imshow(d[50:-50, 50:-50], interpolation='none')#, cmap=pylab.cm.hot, vmin=-4, vmax=4)
+    pylab.imshow(h_estimate + d[final_trim:-final_trim, final_trim:-final_trim], interpolation='none', vmin=-2, vmax=10)
+    # pylab.imshow(h_estimate + d[0:-0, 0:-0], interpolation='none')#, cmap=pylab.cm.hot, vmin=-4, vmax=4)
     pylab.colorbar()
-    pylab.title('y velocity errors / px')
+    pylab.title('Height estimation from y velocity / m')
     pylab.savefig('veldiff_y_%s' % savenm)
 
 
     pylab.figure()
-    pylab.imshow(p[50:-50, 50:-50], interpolation='none')#, cmap=pylab.cm.hot, vmin=-4, vmax=4)
+    pylab.imshow(p[final_trim:-final_trim, final_trim:-final_trim], interpolation='none')#, cmap=pylab.cm.hot, vmin=-4, vmax=4)
     pylab.colorbar()
     pylab.title('y position / px')
     pylab.savefig('p_%s' % savenm)
@@ -585,7 +591,7 @@ def new_algo(fname1, fname2):
     # draped colors
     print(X.shape, Y.shape, Z.shape)
     # m = visvis.surf(X[50:-50, 50:-50], Y[50:-50, 50:-50], Z[50:-50, 50:-50], cv2.cvtColor(img, cv2.COLOR_BGR2RGB)[50:-50, 50:-50, :])
-    m2 = visvis.surf(X[50:-50, 50:-50], Y[50:-50, 50:-50], Z[50:-50, 50:-50])
+    m2 = visvis.surf(X[final_trim:-final_trim, final_trim:-final_trim], Y[final_trim:-final_trim, final_trim:-final_trim], Z[final_trim:-final_trim, final_trim:-final_trim])
     # m2 = visvis.surf(X[300:-100, 100:-100], Y[300:-100, 100:-100], Z[300:-100, 100:-100])
     m2.colormap = visvis.CM_HOT
     plt.waitforbuttonpress()
@@ -614,4 +620,10 @@ if __name__ == '__main__':
     # -4.52572001e-01,   1.73230194e+00,   9.90191487e+00]),
     #                                         np.array([  1.46361732e-03,   2.11674410e-02,  -8.20001910e-02,   8.16957726e-03,
     # -4.77802249e-01,   1.61163646e+00,   9.87439840e+00])))
+    # predicted_to_actual_diff('frame0', 'frame1', np.array([ -5.98229319e-03,   3.60188291e-02,  -2.02366116e-01,  -2.99708161e-01,
+    #     8.90020658e-01,   1.34991118e+00,   9.41107934e+00]))
+    # new_algo('frameV0', 'frameV1')
+  #   predicted_to_actual_diff('frameV0', 'frameV1', np.array([  1.26802901e-04,   5.72032425e-03,  -3.65132317e-02,   1.50954749e-02,
+  # -6.84081432e-01,   1.56653652e+00,   9.90964613e+00]))
+  #   predicted_to_actual_diff('frameV0', 'frameV5')
     new_algo('frame9900', 'frame9903')
