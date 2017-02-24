@@ -5,7 +5,7 @@ import cv2
 import generate_registrations
 
 
-def getFundamental(u1, v1, u2, v2):
+def get_fundamental(u1, v1, u2, v2):
     u1 = u1.reshape((-1, 1))
     v1 = v1.reshape((-1, 1))
     u2 = u2.reshape((-1, 1))
@@ -19,7 +19,7 @@ def getFundamental(u1, v1, u2, v2):
     return NS.reshape((3, 3)) / NS[-1]
 
 
-def getRandT(E):
+def get_rt(E):
     U, s, VT = np.linalg.svd(E)
     Tx = U.dot(
         np.array([
@@ -46,7 +46,7 @@ def getRandT(E):
     return R, t
 
 
-def getProjections(K, R, t):
+def get_projections_from_rt(K, R, t):
     P1 = K.dot(
         np.hstack([np.eye(3), np.zeros((3, 1))])
     )
@@ -56,34 +56,21 @@ def getProjections(K, R, t):
     return P1, P2
 
 
-def genWorld(vel):
-    origshape = vel[0].shape
-    origshapey, origshapex = origshape
+def estimate_world_projections(vel, P1=None, P2=None):
+    # vel should be pre-cropped to ensure good data points (otherwise E becomes unstable)
+    imshape = vel[0].shape
+    shapey, shapex = imshape
     vel[1] = vel[1].clip(-1, 0)
 
-    X, Y = np.meshgrid(np.arange(origshapex), np.arange(origshapey))
+    X, Y = np.meshgrid(np.arange(shapex), np.arange(shapey))
 
     # velocity vectors map pixels in f2 to their locations in f1
-    u1shaped = X + vel[0]*origshapex
-    v1shaped = Y + vel[1]*origshapey
+    u1shaped = X + vel[0]*shapex
+    v1shaped = Y + vel[1]*shapey
     u2shaped, v2shaped = X, Y
 
-    # crop the edges to ensure good data points (otherwise E becomes unstable)
-    crop = 50
-    u1shaped = u1shaped[crop:-crop, crop:-crop]
-    v1shaped = v1shaped[crop:-crop, crop:-crop]
-    u2shaped = u2shaped[crop:-crop, crop:-crop]
-    v2shaped = v2shaped[crop:-crop, crop:-crop]
-    imagesize = u1shaped.shape
-    shapey, shapex = imagesize
-
-    u1 = u1shaped.flatten()
-    v1 = v1shaped.flatten()
-    u2 = u2shaped.flatten()
-    v2 = v2shaped.flatten()
-
-    w1 = np.vstack([u1, v1])
-    w2 = np.vstack([u2, v2])
+    w1 = np.vstack([u1shaped.flatten(), v1shaped.flatten()])
+    w2 = np.vstack([u2shaped.flatten(), v2shaped.flatten()])
     print("w1 as int", w1.astype(int))
     print("w2 as int", w2.astype(int))
 
@@ -91,8 +78,8 @@ def genWorld(vel):
     fku = 1883  # estimated
     # fku = 1700
 
-    K = np.array([[fku,     0, origshapex//2],
-                  [0,     fku, origshapey//2],
+    K = np.array([[fku,     0, shapex//2],
+                  [0,     fku, shapey//2],
                   [0,       0,             1]])
 
     # E, mask = cv2.findEssentialMat(w1.transpose(), w2.transpose(), 2000, (shapey//2, shapex//2))
@@ -104,16 +91,31 @@ def genWorld(vel):
     # print((mask.size - np.sum(mask)) / mask.size)
 
     print("recovering pose")
-    # retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=mask)
-    retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=None)
-    P1, P2 = getProjections(K, R, t)
+    if P1 is None or P2 is None:
+        # retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=mask)
+        retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=None)
+        P1, P2 = get_projections_from_rt(K, R, t)
+    else:
+        # closest to last one
+        R1, R2, t = cv2.decomposeEssentialMat(E)
+        a = get_projections_from_rt(K, R1, t)
+        b = get_projections_from_rt(K, R1, -t)
+        c = get_projections_from_rt(K, R2, t)
+        d = get_projections_from_rt(K, R2, -t)
+        z = [a, b, c, d]
+        diffs = list(map(
+            lambda x: np.linalg.norm(P1-x[0]) + np.linalg.norm(P2-x[1]), z
+        ))
+        print(diffs)
+        P1, P2 = z[np.argmin(diffs)]
+
     # print("mask", mask.T)
     # print(np.sum(mask), ":", mask.size)
     # print(mask.size - np.sum(mask))
     # print((mask.size - np.sum(mask)) / mask.size)
 
     print("triangulating vertices")
-    world = cv2.triangulatePoints(P2.astype(float), P1.astype(float), w2.astype(float), w1.astype(float))
+    world = cv2.triangulatePoints(P1.astype(float), P2.astype(float), w1.astype(float), w2.astype(float))
     # world = cv2.triangulatePoints(P, P2, w1, w2)  # crashes, bug in opencv
     print("triangulated.")
     # world[:, mask.transpose()] = float('nan')
@@ -130,7 +132,7 @@ def genWorld(vel):
 
     print("world shape", world.shape)
 
-    return world[:-1,:], imagesize
+    return world[:-1,:], imshape, P1, P2
 
 
 def align_point_cloud_with_xy(cloud):
@@ -231,27 +233,37 @@ def visualise_world_visvis(X, Y, Z, format="surf"):
     app.Run()
 
 
-def generate_world(fname1, fname2, visual=True, crop=32):
+def generate_world(fname1, fname2, P1=None, P2=None, visual=True):
     vel = generate_registrations.load_velocity_fields(fname1, fname2)
-    world, shape = genWorld(vel)
+    # crop to ensure good E fit
+    crop = 50
+    vel = vel[:,crop:-crop, crop:-crop]
+
+    world, shape, P1, P2 = estimate_world_projections(vel, P1, P2)
+    print("min", np.min(world, 1, keepdims=True))
+    print("max", np.max(world, 1, keepdims=True))
 
     world = align_point_cloud_with_xy(world)
 
-    X = world[0, :].reshape(shape)#[shape[0]//2:, :]#[crop:-crop, crop:-crop]
-    Y = world[1, :].reshape(shape)#[shape[0]//2:, :]#[crop:-crop, crop:-crop]
-    Z = world[2, :].reshape(shape)#[shape[0]//2:, :]#[crop:-crop, crop:-crop]
+    X = world[0, :].reshape(shape)
+    Y = world[1, :].reshape(shape)
+    Z = world[2, :].reshape(shape)
 
     if visual:
         # visualise_world_visvis(X, Y, Z)
         visualise_world_mplotlib(X, Y, Z)
 
-    return world
+    return world, P1, P2
 
 
 def generate_world_average(fnames):
-    vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm),
-                        [(fnames[i], fnames[i+1]) for i in range(len(fnames)-1)])))
+    fnamepairs = [(fnames[i], fnames[i+1]) for i in range(len(fnames)-1)]
+    vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnamepairs)))
+    print(vels.shape)
 
+    # crop vels
+    crop = 50
+    vels = vels[:, :, crop:-crop, crop:-crop]
     print(vels.shape)
 
     nregs = vels.shape[0]
@@ -263,16 +275,21 @@ def generate_world_average(fnames):
 
     worldavg = np.zeros((3, shapey, shapex))
     cumreg = np.array([X, Y]).astype('float32')
+    P1 = P2 = None
 
     for vel in vels:
         # print(vel.shape)
-        world, shape = genWorld(vel)
+        world, shape, P1, P2 = estimate_world_projections(vel, P1, P2)
+
+        # clip world
+        world[0] = world[0].clip(-60, 60)
+        world[1] = world[1].clip(-40, 20)
+        world[2] = world[2].clip(30, 150)
 
         # # velocity vectors map pixels in f2 to their locations in f1
         # u1 = X + vel[0]*shapex
         # v1 = Y + vel[1]*shapey
         # u2, v2 = X, Y
-
 
         X = world[0, :].reshape(imagesize)
         Y = world[1, :].reshape(imagesize)
@@ -287,40 +304,35 @@ def generate_world_average(fnames):
 
     worldavg /= nregs
 
-
-    crop = 50
-    X = worldavg[0, :].reshape(shape)[crop:-crop:, crop:-crop:]
-    Y = worldavg[1, :].reshape(shape)[crop:-crop:, crop:-crop:]
-    Z = worldavg[2, :].reshape(shape)[crop:-crop:, crop:-crop:]
-    croppedshape = X.shape
-
-    flattenedworld = np.vstack([X.flatten(), Y.flatten(), Z.flatten()])
+    flattenedworld = np.vstack([worldavg[0].flatten(), worldavg[1].flatten(), worldavg[2].flatten()])
     worldavg = align_point_cloud_with_xy(flattenedworld)
 
-    crop = None
-    X = worldavg[0, :].reshape(croppedshape)#[crop:-crop:, crop:-crop:]
-    Y = worldavg[1, :].reshape(croppedshape)#[crop:-crop:, crop:-crop:]
-    Z = worldavg[2, :].reshape(croppedshape)#[crop:-crop:, crop:-crop:]
+    crop = 100
+    X = worldavg[0, :].reshape(imagesize)[crop:-crop, crop:-crop]
+    Y = worldavg[1, :].reshape(imagesize)[crop:-crop, crop:-crop]
+    Z = worldavg[2, :].reshape(imagesize)[crop:-crop, crop:-crop]
 
     visualise_world_mplotlib(X, Y, Z)
 
-    return world
+    return worldavg
 
 
-    
-    
 if __name__ == "__main__":
-    # generate_world('frame9900', 'frame9903')
-    # generate_world('frame9903', 'frame9906')
-    # generate_world('frame9906', 'frame9909')
-    # generate_world('frame9909', 'frame9912')
-    # generate_world('frame9912', 'frame9915')
-    # generate_world('frame9915', 'frame9918')
-    generate_world('frame9918', 'frame9921')
-    # generate_world('frame9921', 'frame9924')  # bad
-    # generate_world('frame9924', 'frame9927')
-    # generate_world('frame9927', 'frame9930')
+    # world, P1, P2 = generate_world('frame9900', 'frame9903')
+    # world, P1, P2 = generate_world('frame9903', 'frame9906', P1, P2)
+    # world, P1, P2 = generate_world('frame9906', 'frame9909', P1, P2)
+    # world, P1, P2 = generate_world('frame9909', 'frame9912', P1, P2)
+    # world, P1, P2 = generate_world('frame9912', 'frame9915', P1, P2)
+    # world, P1, P2 = generate_world('frame9915', 'frame9918', P1, P2)
+    # world, P1, P2 = generate_world('frame9918', 'frame9921', P1, P2)
+    # world, P1, P2 = generate_world('frame9921', 'frame9924', P1, P2)  # bad
+    # world, P1, P2 = generate_world('frame9924', 'frame9927', P1, P2)
+    # world, P1, P2 = generate_world('frame9927', 'frame9930', P1, P2)
 
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909'))
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915'))
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915', 'frame9918'))
+    generate_world_average((
+        'frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915',
+        'frame9918', 'frame9921', 'frame9924', 'frame9927', 'frame9930'
+    ))
