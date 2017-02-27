@@ -46,7 +46,8 @@ def align_points_with_xy(points):
     X, Y = np.meshgrid(np.arange(-0.5, 0.5, 0.05), np.arange(-0.5, 0.5, 0.05))
     XX = X.flatten()
     YY = Y.flatten()
-    data = points.transpose()
+    notnan_points = points[:, ~np.isnan(points[-1,:])]
+    data = notnan_points.transpose()
     # best-fit linear plane
     A = np.c_[data[:, 0], data[:, 1], np.ones(data.shape[0])]
     C, _, _, _ = np.linalg.lstsq(A, data[:, 2])  # coefficients
@@ -57,7 +58,7 @@ def align_points_with_xy(points):
     # or expressed using matrix/vector product
     # Z = np.dot(np.c_[XX, YY, np.ones(XX.shape)], C).reshape(X.shape)
 
-    centroid = np.mean(points, axis=1, keepdims=True)
+    centroid = np.mean(notnan_points, axis=1, keepdims=True)
     print("centroid", centroid)
     points -= centroid
 
@@ -113,13 +114,17 @@ def visualise_worlds_mplotlib(*worlds, method="surf"):
     fig = plt.figure()
     ax = fig.gca(projection='3d')
     ax.set_aspect('equal')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
 
     if method == "surf":
         if len(worlds) == 1:
             X, Y, Z = worlds[0].get_shaped()
-            surf = ax.plot_surface(X, Y, Z, cmap=cm.hot,
-                                   linewidth=0, antialiased=False)
-            fig.colorbar(surf)
+            surf = ax.plot_surface(X, Y, Z, cmap=cm.hot, linewidth=0, antialiased=False,
+                                   vmin=np.nanmin(Z), vmax=np.nanmax(Z))
+            surf.cmap.set_under('black')
+            fig.colorbar(surf, extend='both')
         else:
             for i, world in enumerate(worlds):
                 X, Y, Z = world.get_shaped()

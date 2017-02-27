@@ -157,7 +157,7 @@ def generate_world(fname1, fname2, P1=None, P2=None, visual=True):
     return cloud
 
 
-def generate_world_average(fnames):
+def generate_world_average_old(fnames):
     fnamepairs = [(fnames[i], fnames[i+1]) for i in range(len(fnames)-1)]
     vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnamepairs)))
     print(vels.shape)
@@ -176,11 +176,16 @@ def generate_world_average(fnames):
 
     worldavg = np.zeros((3, shapey, shapex))
     cumreg = np.array([X, Y]).astype('float32')
-    P1 = P2 = None
+
+    cloud = None
 
     for vel in vels:
         # print(vel.shape)
-        world, shape, P1, P2 = estimate_world_projections(vel, P1, P2)
+        if cloud is None:
+            cloud = estimate_world_projections(vel, None, None)
+        else:
+            cloud = estimate_world_projections(vel, cloud.P1, cloud.P2)
+        world = cloud.points
 
         # clip world
         world[0] = world[0].clip(-60, 60)
@@ -213,27 +218,100 @@ def generate_world_average(fnames):
     Y = worldavg[1, :].reshape(imagesize)[crop:-crop, crop:-crop]
     Z = worldavg[2, :].reshape(imagesize)[crop:-crop, crop:-crop]
 
-    pointcloud.visualise_world_mplotlib(X, Y, Z)
+    avgcloud = pointcloud.PointCloud(np.vstack([X.flatten(), Y.flatten(), Z.flatten()]), X.shape, None, None, None, None)
+    # avgcloud.points = pointcloud.align_points_with_xy(avgcloud.points)
+    pointcloud.visualise_worlds_mplotlib(avgcloud)
 
-    return worldavg
+
+def average_clouds(clouds):
+    detail = 5  # bins per unit
+    data = np.stack([c.points for c in clouds], axis=0)
+    xmin, ymin, zmin = np.min(data, (0, 2))
+    xmax, ymax, zmax = np.max(data, (0, 2))
+    print("data shape", data.shape)
+    print("data min", np.min(data, (0, 2)))
+    print("data max", np.max(data, (0, 2)))
+
+    data = np.hstack([c.points for c in clouds])
+    print("data shape", data.shape)
+
+    # rounddata = np.round(data / (1/detail)) * (1/detail)  # round to nearest (1/detail)
+    # intdata[:,-1,:] = data[]# round x and y for all sets (not z)
+    # rounddata[2,:] = data[2,:]
+
+    xmin = int(np.floor(xmin))
+    ymin = int(np.floor(ymin))
+    xmax = int(np.ceil(xmax))
+    ymax = int(np.ceil(ymax))
+
+    # xshape = (xmax - xmin + 1)*detail
+    # yshape = (ymax - ymin + 1)*detail
+
+    xarr, yarr = np.arange(xmin, xmax+1, 1/detail), np.arange(ymin, ymax+1, 1/detail)
+    X, Y = np.meshgrid(xarr, yarr)
+    yshape, xshape = X.shape
+    print("X shape", X.shape)
+    print("Y shape", Y.shape)
+
+    # index data
+    indexdata = np.vstack([
+        np.rint((data[0, :] - xmin) * detail),
+        np.rint((data[1, :] - ymin) * detail),
+        data[2, :]
+    ])
+    avgz = np.zeros((yshape, xshape))
+    pcount = np.zeros_like(avgz)
+    print("indexdata min", np.min(indexdata, 1))
+    print("indexdata max", np.max(indexdata, 1))
+
+    for x, y, z in indexdata.T:
+        i, j = int(x), int(y)
+        avgz[j, i] += z
+        pcount[j, i] += 1
+
+    pvals = pcount > 0
+    avgz[pvals] /= pcount[pvals]
+    print("tot pcount", np.sum(pcount))
+
+    from scipy import interpolate
+    # f = interpolate.interp2d(X[pvals], Y[pvals], avgz[pvals], kind='cubic')
+    # Z = f(xarr, yarr)
+
+    # Z = interpolate.griddata(data[:-1,:].T, data[-1,:].T, np.vstack([X.flatten(), Y.flatten()]).T, method='linear')
+    Z = interpolate.griddata(np.vstack([X[pvals], Y[pvals]]).T, avgz[pvals].T, np.vstack([X.flatten(), Y.flatten()]).T, method='linear')
+
+    print("Z shape", Z.shape)
+
+    avgcloud = pointcloud.PointCloud(np.vstack([X.flatten(), Y.flatten(), Z.flatten()]), X.shape, None, None, None, None)
+    avgcloud.points = pointcloud.align_points_with_xy(avgcloud.points)
+    pointcloud.visualise_worlds_mplotlib(avgcloud)
 
 
 if __name__ == "__main__":
-    cloud1 = generate_world('frame9900', 'frame9903', visual=False)
-    cloud2 = generate_world('frame9903', 'frame9906', cloud1.P1, cloud1.P2, visual=False)
-    cloud3 = generate_world('frame9906', 'frame9909', cloud2.P1, cloud2.P2, visual=False)
-    cloud4 = generate_world('frame9909', 'frame9912', cloud3.P1, cloud3.P2, visual=False)
+    # cloud1 = generate_world('frame9900', 'frame9903', visual=False)
+    # cloud2 = generate_world('frame9903', 'frame9906', cloud1.P1, cloud1.P2, visual=False)
+    # cloud3 = generate_world('frame9906', 'frame9909', cloud2.P1, cloud2.P2, visual=False)
+    # cloud4 = generate_world('frame9909', 'frame9912', cloud3.P1, cloud3.P2, visual=False)
+    #
+    # cloud2.points = cloud1.R.T.dot(cloud2.points - cloud1.t)
+    #
+    # cloud3.points = cloud2.R.T.dot(cloud3.points - cloud2.t)
+    # cloud3.points = cloud1.R.T.dot(cloud3.points - cloud1.t)
+    #
+    # cloud4.points = cloud3.R.T.dot(cloud4.points - cloud3.t)
+    # cloud4.points = cloud2.R.T.dot(cloud4.points - cloud2.t)
+    # cloud4.points = cloud1.R.T.dot(cloud4.points - cloud1.t)
+    #
+    # print(min(cloud1.points[0,:]))
+    # print(max(cloud1.points[0,:]))
+    # print(min(cloud1.points[1,:]))
+    # print(max(cloud1.points[1,:]))
+    #
+    # # pointcloud.visualise_worlds_mplotlib(cloud1)#, cloud2, cloud3, cloud4)
+    # average_clouds((cloud1, cloud2, cloud3, cloud4))
 
-    cloud2.points = cloud1.R.T.dot(cloud2.points - cloud1.t)
 
-    cloud3.points = cloud2.R.T.dot(cloud3.points - cloud2.t)
-    cloud3.points = cloud1.R.T.dot(cloud3.points - cloud1.t)
 
-    cloud4.points = cloud3.R.T.dot(cloud4.points - cloud3.t)
-    cloud4.points = cloud2.R.T.dot(cloud4.points - cloud2.t)
-    cloud4.points = cloud1.R.T.dot(cloud4.points - cloud1.t)
-
-    pointcloud.visualise_worlds_mplotlib(cloud1, cloud2, cloud3, cloud4)
     # world, P1, P2 = generate_world('frame9912', 'frame9915', P1, P2)
     # world, P1, P2 = generate_world('frame9915', 'frame9918', P1, P2)
     # world, P1, P2 = generate_world('frame9918', 'frame9921', P1, P2)
@@ -244,7 +322,7 @@ if __name__ == "__main__":
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909'))
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915'))
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915', 'frame9918'))
-    # generate_world_average((
-    #     'frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915',
-    #     'frame9918', 'frame9921', 'frame9924', 'frame9927', 'frame9930'
-    # ))
+    generate_world_average_old((
+        'frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915',
+        'frame9918', 'frame9921', 'frame9924', 'frame9927', 'frame9930'
+    ))
