@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 
 import generate_registrations
+import pointcloud
 
 
 def get_fundamental(u1, v1, u2, v2):
@@ -98,16 +99,19 @@ def estimate_world_projections(vel, P1=None, P2=None):
     else:
         # closest to last one
         R1, R2, t = cv2.decomposeEssentialMat(E)
-        a = get_projections_from_rt(K, R1, t)
-        b = get_projections_from_rt(K, R1, -t)
-        c = get_projections_from_rt(K, R2, t)
-        d = get_projections_from_rt(K, R2, -t)
-        z = [a, b, c, d]
+        Rtcombs = (
+            (R1, t),
+            (R1, -t),
+            (R2, t),
+            (R2, -t),
+        )
+        projs = list(map(lambda rt: get_projections_from_rt(K, *rt), Rtcombs))
         diffs = list(map(
-            lambda x: np.linalg.norm(P1-x[0]) + np.linalg.norm(P2-x[1]), z
+            lambda x: np.linalg.norm(P1-x[0]) + np.linalg.norm(P2-x[1]), projs
         ))
         print(diffs)
-        P1, P2 = z[np.argmin(diffs)]
+        P1, P2 = projs[np.argmin(diffs)]
+        R, t = Rtcombs[np.argmin(diffs)]
 
     # print("mask", mask.T)
     # print(np.sum(mask), ":", mask.size)
@@ -115,122 +119,25 @@ def estimate_world_projections(vel, P1=None, P2=None):
     # print((mask.size - np.sum(mask)) / mask.size)
 
     print("triangulating vertices")
-    world = cv2.triangulatePoints(P1.astype(float), P2.astype(float), w1.astype(float), w2.astype(float))
+    points = cv2.triangulatePoints(P1.astype(float), P2.astype(float), w1.astype(float), w2.astype(float))
     # world = cv2.triangulatePoints(P, P2, w1, w2)  # crashes, bug in opencv
     print("triangulated.")
     # world[:, mask.transpose()] = float('nan')
 
-    world /= world[-1,:]
+    points /= points[-1,:]
 
-    check1 = P1.dot(world[:, world.shape[1]//4])
+    check1 = P1.dot(points[:, points.shape[1]//4])
     check1 /= check1[-1]
-    print("check", check1, w1[:, world.shape[1]//4])
+    print("check", check1, w1[:, points.shape[1]//4])
 
-    check2 = P2.dot(world[:, world.shape[1]//4])
+    check2 = P2.dot(points[:, points.shape[1]//4])
     check2 /= check2[-1]
-    print("check", check2, w2[:, world.shape[1]//4])
+    print("check", check2, w2[:, points.shape[1]//4])
 
-    print("world shape", world.shape)
+    print("world shape", points.shape)
 
-    return world[:-1,:], imshape, P1, P2
-
-
-def align_point_cloud_with_xy(cloud):
-    # regular grid covering the domain of the data
-    X, Y = np.meshgrid(np.arange(-0.5, 0.5, 0.05), np.arange(-0.5, 0.5, 0.05))
-    XX = X.flatten()
-    YY = Y.flatten()
-    data = cloud.transpose()
-    # best-fit linear plane
-    A = np.c_[data[:, 0], data[:, 1], np.ones(data.shape[0])]
-    C, _, _, _ = np.linalg.lstsq(A, data[:, 2])  # coefficients
-
-    # evaluate it on grid
-    Z = C[0] * X + C[1] * Y + C[2]
-
-    # or expressed using matrix/vector product
-    # Z = np.dot(np.c_[XX, YY, np.ones(XX.shape)], C).reshape(X.shape)
-
-    centroid = np.mean(cloud, axis=1, keepdims=True)
-    print("centroid", centroid)
-    cloud -= centroid
-
-    cos_t = 1 / np.sqrt(C[0] ** 2 + C[1] ** 2 + 1)
-    sin_t = np.sin(np.arccos(cos_t))
-    ux = cos_t * -C[1]
-    uy = cos_t * C[0]
-    n = np.sqrt(ux ** 2 + uy ** 2)
-    ux /= n
-    uy /= n
-
-    R = np.array([
-        [cos_t + ux ** 2 * (1 - cos_t), ux * uy * (1 - cos_t), uy * sin_t],
-        [ux * uy * (1 - cos_t), cos_t + uy ** 2 * (1 - cos_t), -ux * sin_t],
-        [-uy * sin_t, ux * sin_t, cos_t]
-    ])
-
-    return R.dot(cloud)
-
-
-def visualise_world_mplotlib(X, Y, Z):
-    from mpl_toolkits.mplot3d import Axes3D
-    import matplotlib.pyplot as plt
-    from matplotlib import cm
-    from matplotlib.ticker import LinearLocator, FormatStrFormatter
-
-    fig = plt.figure()
-    ax = fig.gca(projection='3d')
-
-    # Plot the surface.
-    surf = ax.plot_surface(X, Y, Z, cmap=cm.hot,
-                           linewidth=0, antialiased=False)
-
-    ax.set_aspect('equal')
-    # Customize the z axis.
-    # ax.set_zlim(-1.01, 1.01)
-    # ax.zaxis.set_major_locator(LinearLocator(10))
-    # ax.zaxis.set_major_formatter(FormatStrFormatter('%.02f'))
-
-    # Add a color bar which maps values to colors.
-    # fig.colorbar(surf, shrink=0.5, aspect=5)
-    fig.colorbar(surf)
-
-    max_range = np.array([X.max() - X.min(), Y.max() - Y.min(), Z.max() - Z.min()]).max() / 2.0
-
-    mid_x = (X.max() + X.min()) * 0.5
-    mid_y = (Y.max() + Y.min()) * 0.5
-    mid_z = (Z.max() + Z.min()) * 0.5
-    ax.set_xlim(mid_x - max_range, mid_x + max_range)
-    ax.set_ylim(mid_y - max_range, mid_y + max_range)
-    ax.set_zlim(mid_z - max_range, mid_z + max_range)
-    # ax.set_zlim(mid_z - max_range/50, mid_z + max_range/50)
-
-    plt.show()
-
-
-def visualise_world_visvis(X, Y, Z, format="surf"):
-    import visvis as vv
-
-    # m2 = vv.surf(worldx[::detail], worldy[::detail], worldz[::detail])
-
-    app = vv.use()
-    # prepare axes
-    a = vv.gca()
-    a.cameraType = '3d'
-    a.daspectAuto = False
-    # print("view", a.camera.GetViewParams())
-    # a.SetView(loc=(-1000,0,0))
-    # a.camera.SetView(None, loc=(-1000,0,0))
-
-    if format == "surf":
-        l = vv.surf(X, Y, Z)
-        a.SetLimits(rangeX=(-0.2, 0.2), rangeY=(-0.5, 0.5), rangeZ=(-0.5, 0), margin=0.02)
-    else:
-        # draw points
-        pp = vv.Pointset(np.concatenate([X.flatten(), Y.flatten(), Z.flatten()], axis=0).reshape((-1, 3)))
-        l = vv.plot(pp, ms='.', mc='r', mw='5', ls='', mew=0)
-        l.alpha = 0.2
-    app.Run()
+    # return points[:-1,:], imshape, P1, P2
+    return pointcloud.PointCloud(points[:-1,:], imshape, P1, P2, R, t)
 
 
 def generate_world(fname1, fname2, P1=None, P2=None, visual=True):
@@ -239,21 +146,15 @@ def generate_world(fname1, fname2, P1=None, P2=None, visual=True):
     crop = 50
     vel = vel[:,crop:-crop, crop:-crop]
 
-    world, shape, P1, P2 = estimate_world_projections(vel, P1, P2)
-    print("min", np.min(world, 1, keepdims=True))
-    print("max", np.max(world, 1, keepdims=True))
+    cloud = estimate_world_projections(vel, P1, P2)
 
-    world = align_point_cloud_with_xy(world)
-
-    X = world[0, :].reshape(shape)
-    Y = world[1, :].reshape(shape)
-    Z = world[2, :].reshape(shape)
+    # cloud.points = pointcloud.align_points_with_xy(cloud.points)
 
     if visual:
         # visualise_world_visvis(X, Y, Z)
-        visualise_world_mplotlib(X, Y, Z)
+        pointcloud.visualise_worlds_mplotlib(cloud)
 
-    return world, P1, P2
+    return cloud
 
 
 def generate_world_average(fnames):
@@ -305,23 +206,34 @@ def generate_world_average(fnames):
     worldavg /= nregs
 
     flattenedworld = np.vstack([worldavg[0].flatten(), worldavg[1].flatten(), worldavg[2].flatten()])
-    worldavg = align_point_cloud_with_xy(flattenedworld)
+    worldavg = pointcloud.align_points_with_xy(flattenedworld)
 
     crop = 100
     X = worldavg[0, :].reshape(imagesize)[crop:-crop, crop:-crop]
     Y = worldavg[1, :].reshape(imagesize)[crop:-crop, crop:-crop]
     Z = worldavg[2, :].reshape(imagesize)[crop:-crop, crop:-crop]
 
-    visualise_world_mplotlib(X, Y, Z)
+    pointcloud.visualise_world_mplotlib(X, Y, Z)
 
     return worldavg
 
 
 if __name__ == "__main__":
-    # world, P1, P2 = generate_world('frame9900', 'frame9903')
-    # world, P1, P2 = generate_world('frame9903', 'frame9906', P1, P2)
-    # world, P1, P2 = generate_world('frame9906', 'frame9909', P1, P2)
-    # world, P1, P2 = generate_world('frame9909', 'frame9912', P1, P2)
+    cloud1 = generate_world('frame9900', 'frame9903', visual=False)
+    cloud2 = generate_world('frame9903', 'frame9906', cloud1.P1, cloud1.P2, visual=False)
+    cloud3 = generate_world('frame9906', 'frame9909', cloud2.P1, cloud2.P2, visual=False)
+    cloud4 = generate_world('frame9909', 'frame9912', cloud3.P1, cloud3.P2, visual=False)
+
+    cloud2.points = cloud1.R.T.dot(cloud2.points - cloud1.t)
+
+    cloud3.points = cloud2.R.T.dot(cloud3.points - cloud2.t)
+    cloud3.points = cloud1.R.T.dot(cloud3.points - cloud1.t)
+
+    cloud4.points = cloud3.R.T.dot(cloud4.points - cloud3.t)
+    cloud4.points = cloud2.R.T.dot(cloud4.points - cloud2.t)
+    cloud4.points = cloud1.R.T.dot(cloud4.points - cloud1.t)
+
+    pointcloud.visualise_worlds_mplotlib(cloud1, cloud2, cloud3, cloud4)
     # world, P1, P2 = generate_world('frame9912', 'frame9915', P1, P2)
     # world, P1, P2 = generate_world('frame9915', 'frame9918', P1, P2)
     # world, P1, P2 = generate_world('frame9918', 'frame9921', P1, P2)
@@ -332,7 +244,7 @@ if __name__ == "__main__":
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909'))
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915'))
     # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915', 'frame9918'))
-    generate_world_average((
-        'frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915',
-        'frame9918', 'frame9921', 'frame9924', 'frame9927', 'frame9930'
-    ))
+    # generate_world_average((
+    #     'frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915',
+    #     'frame9918', 'frame9921', 'frame9924', 'frame9927', 'frame9930'
+    # ))
