@@ -18,26 +18,26 @@ def take_transform(frame):
     return trans.forward(frame, nlevels=7)
 
 
-def load_frame(fname):
-    path = './data/%s.png' % fname
-    img = cv2.imread('./data/%s.png' % fname)
+def load_frame(fnum):
+    path = './data/{}.png'.format(fnum)
+    img = cv2.imread(path)
     if img is None:
         # generate frame from video
-        # TODO: MAKE THIS A GENERIC PROCESS
-        img = get_frames.get_frame_number(int(fname[-4:]))
+        img = get_frames.get_frame_number(fnum)
+        # used to cache frame here
     return img
 
 
 
-def load_transform_frame(fname, cache=False):
+def load_transform_frame(fnum, cache=False):
     logging.info('Taking transform')
-    path = './data/transform_%s.pickle' % fname
+    path = './data/transform_{}.pickle'.format(fnum)
     try:
         # tform = np.load(path)
         with open(path, 'rb') as fileob:
             tform = pickle.load(fileob)
     except (IOError, FileNotFoundError) as e:
-        frame = cv2.cvtColor(load_frame(fname), cv2.COLOR_BGR2GRAY)
+        frame = cv2.cvtColor(load_frame(fnum), cv2.COLOR_BGR2GRAY)
         tform = take_transform(frame)
         if cache:
             with open(path, 'wb') as fileob:
@@ -46,32 +46,32 @@ def load_transform_frame(fname, cache=False):
     return tform
 
 
-def load_flow(fname1, fname2, cache=True):
+def load_flow(fnum1, fnum2, cache=True):
     logging.info('Finding flow')
-    path = './data/flow_%s_%s.npy' % (fname1, fname2)
+    path = './data/flow_{}_{}.npy'.format(fnum1, fnum2)
     try:
         flow = np.load(path)
     except (IOError, FileNotFoundError) as e:
-        flow = reg.estimatereg(load_transform_frame(fname1), load_transform_frame(fname2))
+        flow = reg.estimatereg(load_transform_frame(fnum1), load_transform_frame(fnum2))
         if cache:
             np.save(path, flow)
     return flow
 
 
-def load_velocity_fields(fname1, fname2, shape=None, cache=False):
+def load_velocity_fields(fnum1, fnum2, shape=None, cache=False):
     # cache is off by default, because of large file sizes, and low computation expense
     logging.info('Computing velocities')
+    path = './data/velocities_{}_{}.npy'.format(fnum1, fnum2)
     if shape is None:
-        shape = load_frame(fname1).shape[:2]
-    path = './data/velocities_%s_%s.npy' % (fname1, fname2)
+        shape = load_frame(fnum1).shape[:2]
     try:
         vels = np.load(path)
     except (IOError, FileNotFoundError) as e:
-        vels = np.array(reg.velocityfield(load_flow(fname1, fname2), shape, method='nearest'))
+        vels = np.array(reg.velocityfield(load_flow(fnum1, fnum2), shape, method='nearest'))
         if cache:
             np.save(path, vels)
     return vels
 
 
 if __name__ == '__main__':
-    load_velocity_fields('frame9900', 'frame9903')
+    load_velocity_fields(9900, 9903)

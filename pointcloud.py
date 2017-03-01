@@ -121,8 +121,10 @@ def visualise_worlds_mplotlib(*worlds, method="surf"):
     if method == "surf":
         if len(worlds) == 1:
             X, Y, Z = worlds[0].get_shaped()
+            print("Z range", np.nanmin(Z), np.nanmax(Z))
             surf = ax.plot_surface(X, Y, Z, cmap=cm.hot, linewidth=0, antialiased=False,
-                                   vmin=np.nanmin(Z), vmax=np.nanmax(Z))
+                                   vmin=np.nanmin(Z), vmax=np.nanmax(Z))  # these limits seem to make it less
+                                                                        # sharp, but are required to deal with NaNs
             surf.cmap.set_under('black')
             fig.colorbar(surf, extend='both')
         else:

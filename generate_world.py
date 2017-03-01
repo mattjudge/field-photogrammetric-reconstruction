@@ -140,15 +140,15 @@ def estimate_world_projections(vel, P1=None, P2=None):
     return pointcloud.PointCloud(points[:-1,:], imshape, P1, P2, R, t)
 
 
-def generate_world(fname1, fname2, P1=None, P2=None, visual=True):
-    vel = generate_registrations.load_velocity_fields(fname1, fname2)
+def generate_world(fnum1, fnum2, P1=None, P2=None, visual=True):
+    vel = generate_registrations.load_velocity_fields(fnum1, fnum2)
     # crop to ensure good E fit
     crop = 50
-    vel = vel[:,crop:-crop, crop:-crop]
+    vel = vel[:, crop:-crop, crop:-crop]
 
     cloud = estimate_world_projections(vel, P1, P2)
 
-    # cloud.points = pointcloud.align_points_with_xy(cloud.points)
+    cloud.points = pointcloud.align_points_with_xy(cloud.points)
 
     if visual:
         # visualise_world_visvis(X, Y, Z)
@@ -157,9 +157,9 @@ def generate_world(fname1, fname2, P1=None, P2=None, visual=True):
     return cloud
 
 
-def generate_world_average_old(fnames):
-    fnamepairs = [(fnames[i], fnames[i+1]) for i in range(len(fnames)-1)]
-    vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnamepairs)))
+def generate_world_average_old(fnums):
+    fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
+    vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnumpairs)))
     print(vels.shape)
 
     # crop vels
@@ -310,19 +310,16 @@ if __name__ == "__main__":
     # # pointcloud.visualise_worlds_mplotlib(cloud1)#, cloud2, cloud3, cloud4)
     # average_clouds((cloud1, cloud2, cloud3, cloud4))
 
+    # verify sensible results
+    # cloud0 = generate_world(9900, 9903, visual=True)
+    # cloud1 = generate_world(9903, 9906, cloud0.P1, cloud0.P2, visual=True)
+    # cloud2 = generate_world(9906, 9909, cloud1.P1, cloud1.P2, visual=True)
+    # cloud3 = generate_world(9909, 9912, cloud2.P1, cloud2.P2, visual=True)
+    # cloud4 = generate_world(9912, 9915, cloud3.P1, cloud3.P2, visual=True)
+    # cloud5 = generate_world(9915, 9918, cloud4.P1, cloud4.P2, visual=True)
+    # cloud6 = generate_world(9918, 9921, cloud5.P1, cloud5.P2, visual=True)
+    # cloud7 = generate_world(9921, 9924, cloud6.P1, cloud6.P2, visual=True)  # bad
+    # cloud8 = generate_world(9924, 9927, cloud7.P1, cloud7.P2, visual=True)
+    # cloud9 = generate_world(9927, 9930, cloud8.P1, cloud8.P2, visual=True)
 
-
-    # world, P1, P2 = generate_world('frame9912', 'frame9915', P1, P2)
-    # world, P1, P2 = generate_world('frame9915', 'frame9918', P1, P2)
-    # world, P1, P2 = generate_world('frame9918', 'frame9921', P1, P2)
-    # world, P1, P2 = generate_world('frame9921', 'frame9924', P1, P2)  # bad
-    # world, P1, P2 = generate_world('frame9924', 'frame9927', P1, P2)
-    # world, P1, P2 = generate_world('frame9927', 'frame9930', P1, P2)
-
-    # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909'))
-    # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915'))
-    # generate_world_average(('frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915', 'frame9918'))
-    generate_world_average_old((
-        'frame9900', 'frame9903', 'frame9906', 'frame9909', 'frame9912', 'frame9915',
-        'frame9918', 'frame9921', 'frame9924', 'frame9927', 'frame9930'
-    ))
+    generate_world_average_old(list(range(9900, 9931, 3)))  # 9900 to 9930 inclusive (10 pairs)
