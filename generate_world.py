@@ -113,6 +113,11 @@ def estimate_world_projections(vel, P1=None, P2=None):
         P1, P2 = projs[np.argmin(diffs)]
         R, t = Rtcombs[np.argmin(diffs)]
 
+    # print("R", R)
+    # print("t", t)
+    # print("P1", P1)
+    # print("P2", P2)
+
     # print("mask", mask.T)
     # print(np.sum(mask), ":", mask.size)
     # print(mask.size - np.sum(mask))
@@ -161,6 +166,7 @@ def generate_world_average_old(fnums):
     fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
     vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnumpairs)))
     print(vels.shape)
+    # print("vels", vels)
 
     # crop vels
     crop = 50
@@ -180,6 +186,9 @@ def generate_world_average_old(fnums):
     cloud = None
 
     for vel in vels:
+        # print("x vel", vel[0]*shapex)
+        # print("y vel", vel[1]*shapey)
+        # print("min y vel", np.min(vel[1]*shapey))
         # print(vel.shape)
         if cloud is None:
             cloud = estimate_world_projections(vel, None, None)
@@ -206,6 +215,8 @@ def generate_world_average_old(fnums):
         worldavg[1] += cv2.remap(Y, cumreg[0].astype('float32'), cumreg[1].astype('float32'), cv2.INTER_LINEAR)
         worldavg[2] += cv2.remap(Z, cumreg[0].astype('float32'), cumreg[1].astype('float32'), cv2.INTER_LINEAR)
 
+        vel[0,:,:] *= shapex
+        vel[1,:,:] *= shapey
         cumreg += vel
 
     worldavg /= nregs
@@ -220,6 +231,118 @@ def generate_world_average_old(fnums):
 
     avgcloud = pointcloud.PointCloud(np.vstack([X.flatten(), Y.flatten(), Z.flatten()]), X.shape, None, None, None, None)
     # avgcloud.points = pointcloud.align_points_with_xy(avgcloud.points)
+    pointcloud.visualise_worlds_mplotlib(avgcloud)
+
+
+def generate_world_average_new(fnums):
+    fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
+    vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnumpairs)))
+    print(vels.shape)
+
+    # crop vels
+    crop = 50
+    vels = vels[:, :, crop:-crop, crop:-crop]
+    print(vels.shape)
+
+    nregs = vels.shape[0]
+    imagesize = vels[0][0].shape
+    shapex = imagesize[1]
+    shapey = imagesize[0]
+
+    X, Y = np.meshgrid(np.arange(shapex), np.arange(shapey))
+    coords = list(zip(X.flatten(), Y.flatten()))
+
+    worldavg = np.zeros((3, shapey*3, shapex))
+    avgX, avgY = np.meshgrid(np.arange(worldavg.shape[2]), np.arange(worldavg.shape[1]))
+    worldcnt = np.zeros((shapey*3, shapex))
+    cumreg = np.array([X, Y+shapey*2]).astype('float32')
+
+    cloud = None
+
+    for vel in vels:
+        # print(vel.shape)
+        if cloud is None:
+            # cloud = estimate_world_projections(vel, None, None)
+            cloud = estimate_world_projections(vel,
+           np.array([[1.88300000e+03, 0.00000000e+00,   9.10000000e+02,   0.00000000e+00],
+           [0.00000000e+00, 1.88300000e+03, 4.90000000e+02, 0.00000000e+00],
+            [0.00000000e+00,   0.00000000e+00,   1.00000000e+00,   0.00000000e+00]]),
+            np.array([[1.88348095e+03, -1.18549676e-01,   9.09004116e+02, -8.07573272e+02],
+            [1.72582273e+00, 1.88372392e+03, 4.87206551e+02, 6.61298027e+02],
+            [5.29438024e-04,   1.48277499e-03 ,  9.99998761e-01 , -8.24083973e-01]])
+                                               )
+        else:
+            cloud = estimate_world_projections(vel, cloud.P1, cloud.P2)
+        world = cloud.points
+
+        # clip world
+        world[0] = world[0].clip(-60, 60)
+        world[1] = world[1].clip(-40, 20)
+        world[2] = world[2].clip(30, 150)
+
+        # # velocity vectors map pixels in f2 to their locations in f1
+        # u1 = X + vel[0]*shapex
+        # v1 = Y + vel[1]*shapey
+        # u2, v2 = X, Y
+
+        X = world[0, :].reshape(imagesize)
+        Y = world[1, :].reshape(imagesize)
+        Z = world[2, :].reshape(imagesize)
+
+        # dst(x, y) = src(mapx(x, y), mapy(x, y))
+        mapx = cumreg[0,:,:].round().astype(int)
+        mapy = cumreg[1,:,:].round().astype(int)
+
+        for x, y in coords:
+            # print(x, y, mapx[y, x], mapy[y, x])
+            worldavg[0, mapy[y, x], mapx[y, x]] += X[y, x]
+            worldavg[1, mapy[y, x], mapx[y, x]] += Y[y, x]
+            worldavg[2, mapy[y, x], mapx[y, x]] += Z[y, x]
+            worldcnt[mapy[y, x], mapx[y, x]] += 1
+
+        # worldavg[0] += cv2.remap(X, mapx, mapy, cv2.INTER_LINEAR)
+        # worldavg[1] += cv2.remap(Y, mapx, mapy, cv2.INTER_LINEAR)
+        # worldavg[2] += cv2.remap(Z, mapx, mapy, cv2.INTER_LINEAR)
+
+        # print("cumreg", cumreg)
+        print("sumcnt", np.sum(worldcnt))
+        vel[0,:,:] *= shapex
+        vel[1,:,:] *= shapey
+        cumreg += vel
+
+    print("max count", np.max(worldcnt))
+
+    # display world average contribution counts
+    # cntX, cntY = np.meshgrid(np.arange(worldcnt.shape[1]), np.arange(worldcnt.shape[0]))
+    # cntcloud = pointcloud.PointCloud(np.vstack([cntX.flatten(), cntY.flatten(), worldcnt.flatten()]), worldcnt.shape,
+    #                                  None, None, None, None)
+    # pointcloud.visualise_worlds_mplotlib(cntcloud)
+
+    # display world average
+    mask = worldcnt > 2
+    worldavg = worldavg[:, mask] / worldcnt[mask]  # just points enabled in mask
+    flattenedworld = np.vstack([worldavg[0].flatten(), worldavg[1].flatten(), worldavg[2].flatten()])
+    worldavg = pointcloud.align_points_with_xy(flattenedworld)
+
+    from scipy.interpolate import griddata
+    # Z = griddata(
+    #     np.vstack([avgX[mask].flatten(), avgY[mask].flatten()]).T,
+    #     worldavg[2].flatten(),
+    #     np.vstack([avgX.flatten(), avgY.flatten()]).T,
+    #     method="nearest"
+    # )
+
+    globX, globY = np.meshgrid(np.arange(np.min(worldavg[0]), np.max(worldavg[0])),
+                               np.arange(np.min(worldavg[1]), np.max(worldavg[1])))
+
+    Z = griddata(
+        np.vstack([worldavg[0].flatten(), worldavg[1].flatten()]).T,
+        worldavg[2].flatten(),
+        np.vstack([globX.flatten(), globY.flatten()]).T,
+        method="linear"
+    )
+
+    avgcloud = pointcloud.PointCloud(np.vstack([globX.flatten(), globY.flatten(), Z.flatten()]), globX.shape, None, None, None, None)
     pointcloud.visualise_worlds_mplotlib(avgcloud)
 
 
@@ -322,4 +445,7 @@ if __name__ == "__main__":
     # cloud8 = generate_world(9924, 9927, cloud7.P1, cloud7.P2, visual=True)
     # cloud9 = generate_world(9927, 9930, cloud8.P1, cloud8.P2, visual=True)
 
-    generate_world_average_old(list(range(9900, 9931, 3)))  # 9900 to 9930 inclusive (10 pairs)
+    # generate_world_average_old(list(range(9900, 9931, 3)))  # 9900 to 9930 inclusive (10 pairs)
+    # generate_world_average_old([9900, 9903])
+    generate_world_average_old(list(range(9900, 10000, 3)))
+    # generate_world_average_old(list(range(9900, 9910, 3)))

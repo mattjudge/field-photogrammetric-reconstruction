@@ -80,15 +80,16 @@ def align_points_with_xy(points):
 
 
 def set_axes_equal(ax):
-    '''Make axes of 3D plot have equal scale so that spheres appear as spheres,
+    """
+    Make axes of 3D plot have equal scale so that spheres appear as spheres,
     cubes as cubes, etc..  This is one possible solution to Matplotlib's
     ax.set_aspect('equal') and ax.axis('equal') not working for 3D.
 
     Ref: http://stackoverflow.com/a/31364297
 
-    Input
-      ax: a matplotlib axis, e.g., as output from plt.gca().
-    '''
+    :param ax: a matplotlib axis, e.g., as output from plt.gca().
+    :return: None
+    """
 
     x_limits = ax.get_xlim3d()
     y_limits = ax.get_ylim3d()
