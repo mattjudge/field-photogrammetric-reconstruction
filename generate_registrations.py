@@ -9,9 +9,10 @@ import pickle
 from dtcwt.numpy import Transform2d
 import dtcwt.registration as reg
 
-import get_frames
+import video
 
 logging.basicConfig(level=logging.INFO)
+
 
 def take_transform(frame):
     trans = Transform2d()
@@ -23,10 +24,9 @@ def load_frame(fnum):
     img = cv2.imread(path)
     if img is None:
         # generate frame from video
-        img = get_frames.get_frame_number(fnum)
+        img = video.get_frame_number(fnum)
         # used to cache frame here
     return img
-
 
 
 def load_transform_frame(fnum, cache=False):
@@ -42,7 +42,7 @@ def load_transform_frame(fnum, cache=False):
         if cache:
             with open(path, 'wb') as fileob:
                 pickle.dump(tform, fileob)
-            # np.save(path, tform)
+                # np.save(path, tform)
     return tform
 
 

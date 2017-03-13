@@ -1,5 +1,8 @@
 import cv2
 
+
+#TODO: make this a class
+
 # constants found in
 # https://github.com/opencv/opencv/blob/e3ae36dcb3c1d523802f8642e5c3984db43637c4/modules/python/src2/defs
 
@@ -19,7 +22,7 @@ def get_frame_number(fnum):
 def save_frame_number(fnum):
     frame = get_frame_number(fnum)
     path = "./data/frame{}.png".format(fnum, frame)
-    cv2.imwrite(path)
+    cv2.imwrite(path, frame)
     print("written", path)
     return frame
 
