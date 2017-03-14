@@ -1,6 +1,7 @@
 
 import numpy as np
 import cv2
+from scipy import interpolate
 import dtcwt.registration
 
 import generate_registrations
@@ -80,6 +81,7 @@ def estimate_world_projections(vel, P1=None, P2=None):
     fku = 1883  # estimated
     # fku = 1700
 
+    # TODO: ensure shapex, shapey are correct estimations given cropping of vels
     K = np.array([[fku,     0, shapex//2],
                   [0,     fku, shapey//2],
                   [0,       0,             1]])
@@ -95,7 +97,8 @@ def estimate_world_projections(vel, P1=None, P2=None):
     print("recovering pose")
     if P1 is None or P2 is None:
         # retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=mask)
-        retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=None)
+        # TODO: refine sampling method
+        retval, R, t, mask = cv2.recoverPose(E, w1[:,::100].transpose(), w2[:,::100].transpose(), K, mask=None)
         P1, P2 = get_projections_from_rt(K, R, t)
     else:
         # closest to last one
@@ -114,8 +117,8 @@ def estimate_world_projections(vel, P1=None, P2=None):
         P1, P2 = projs[np.argmin(diffs)]
         R, t = Rtcombs[np.argmin(diffs)]
 
-    # print("R", R)
-    # print("t", t)
+    print("R", R)
+    print("t", t)
     # print("P1", P1)
     # print("P2", P2)
 
@@ -235,7 +238,11 @@ def generate_world_average_old(fnums):
     pointcloud.visualise_worlds_mplotlib(avgcloud)
 
 
-def generate_world_average_new(fnums):
+def gen_running_avg(fnums, initcloud=None):
+    # generates a "moving average"
+    # beware that initial frames become increasingly "blurred" over a greater number of input frames
+    # should only be used for small numbers of frames
+
     fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
     vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnumpairs)))
     print(vels.shape)
@@ -258,20 +265,12 @@ def generate_world_average_new(fnums):
     # worldcnt = np.zeros((shapey*3, shapex))
     worldavg = np.zeros((shapey, shapex, 3))
 
-    cloud = None
+    cloud = initcloud
 
     for vel in vels:
         # print(vel.shape)
         if cloud is None:
-            # cloud = estimate_world_projections(vel, None, None)
-            cloud = estimate_world_projections(vel,
-           np.array([[1.88300000e+03, 0.00000000e+00,   9.10000000e+02,   0.00000000e+00],
-           [0.00000000e+00, 1.88300000e+03, 4.90000000e+02, 0.00000000e+00],
-            [0.00000000e+00,   0.00000000e+00,   1.00000000e+00,   0.00000000e+00]]),
-            np.array([[1.88348095e+03, -1.18549676e-01,   9.09004116e+02, -8.07573272e+02],
-            [1.72582273e+00, 1.88372392e+03, 4.87206551e+02, 6.61298027e+02],
-            [5.29438024e-04,   1.48277499e-03 ,  9.99998761e-01 , -8.24083973e-01]])
-                                               )
+            cloud = estimate_world_projections(vel, None, None)
         else:
             cloud = estimate_world_projections(vel, cloud.P1, cloud.P2)
         world = cloud.points
@@ -360,6 +359,9 @@ def average_clouds(clouds):
     data = np.hstack([c.points for c in clouds])
     print("data shape", data.shape)
 
+    # print("flattening to xy plane")
+    # data = pointcloud.align_points_with_xy(data)
+
     # rounddata = np.round(data / (1/detail)) * (1/detail)  # round to nearest (1/detail)
     # intdata[:,-1,:] = data[]# round x and y for all sets (not z)
     # rounddata[2,:] = data[2,:]
@@ -389,16 +391,18 @@ def average_clouds(clouds):
     print("indexdata min", np.min(indexdata, 1))
     print("indexdata max", np.max(indexdata, 1))
 
+    print("binning data")
     for x, y, z in indexdata.T:
         i, j = int(x), int(y)
         avgz[j, i] += z
         pcount[j, i] += 1
 
-    pvals = pcount > 0
+    pvals = pcount > 3
     avgz[pvals] /= pcount[pvals]
     print("tot pcount", np.sum(pcount))
+    print("accepted bins", np.sum(pcount[pvals]), pcount[pvals].shape)
 
-    from scipy import interpolate
+    print("interpolating data")
     # f = interpolate.interp2d(X[pvals], Y[pvals], avgz[pvals], kind='cubic')
     # Z = f(xarr, yarr)
 
@@ -412,21 +416,84 @@ def average_clouds(clouds):
     pointcloud.visualise_worlds_mplotlib(avgcloud)
 
 
-def gen_world_avg_pairs_gc(fnums):
-    # set up with known initial projections
-    initP1 = np.array([[1.88300000e+03, 0.00000000e+00, 9.10000000e+02, 0.00000000e+00],
-                       [0.00000000e+00, 1.88300000e+03, 4.90000000e+02, 0.00000000e+00],
-                       [0.00000000e+00, 0.00000000e+00, 1.00000000e+00, 0.00000000e+00]])
-    initP2 = np.array([[1.88348095e+03, -1.18549676e-01, 9.09004116e+02, -8.07573272e+02],
-                       [1.72582273e+00, 1.88372392e+03, 4.87206551e+02, 6.61298027e+02],
-                       [5.29438024e-04, 1.48277499e-03, 9.99998761e-01, -8.24083973e-01]])
-    cloudprev = pointcloud.PointCloud(None, None, initP1, initP2, None, None)
+def gen_world_avg_pairs_gc(fnums, initcloud=None):
+    # generate frame number pairs
+    fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
 
-    fprev = fnums[0]
-    for fcur in fnums[1:]:
-        vel = generate_registrations.load_velocity_fields(fprev, fcur)
-        velx, vely = vel
+    # generate pair velocity fields
+    vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnumpairs)))
+    print(vels.shape)
+    # crop vels
+    crop = 50
+    vels = vels[:, :, crop:-crop, crop:-crop]
+    print(vels.shape)
 
+    nregs = vels.shape[0]
+    imgshape = vels[0][0].shape
+    shapey, shapex = imgshape
+
+    X, Y = np.meshgrid(np.arange(shapex, dtype=np.float32),
+                       np.arange(shapey, dtype=np.float32))
+
+    # generate pair clouds
+    clouds = []
+    cloud = initcloud
+    for vel in vels:
+        cloud = None
+        # print(vel.shape)
+        if cloud is None:
+            cloud = estimate_world_projections(vel, None, None)
+        else:
+            cloud = estimate_world_projections(vel, cloud.P1, cloud.P2)
+        clouds.append(cloud)
+
+    # generate moving average of clouds
+    avgperiod = 5
+    avgclouds = []
+    for i in range(len(clouds) - (avgperiod - 1)):
+        avg = np.zeros_like(clouds[i].get_shaped())
+        # print("avg shape", avg.shape)
+        for j in range(avgperiod):
+            index = i + j
+            p = clouds[index].get_shaped()
+            mapX = (X + vels[index][0] * shapex).astype('float32')
+            mapY = (Y + vels[index][1] * shapey).astype('float32')
+            avg = p + cv2.remap(avg, mapX, mapY,
+                            interpolation=cv2.INTER_LINEAR,  # INTER_LANCZOS4,
+                            borderMode=cv2.BORDER_TRANSPARENT)
+        avg /= avgperiod
+
+        crop = 100
+        avgcloudX = avg[:, :, 0][600:-crop, crop:-crop]
+        avgcloudY = avg[:, :, 1][600:-crop, crop:-crop]
+        avgcloudZ = avg[:, :, 2][600:-crop, crop:-crop]
+
+        avgcloud = pointcloud.PointCloud(np.vstack([avgcloudX.flatten(), avgcloudY.flatten(), avgcloudZ.flatten()]),
+                                        avgcloudX.shape, None, None, None, None)
+        avgclouds.append(avgcloud)
+        # avgcloud.points = pointcloud.align_points_with_xy(avgcloud.points)
+        # pointcloud.visualise_worlds_mplotlib(avgcloud)
+
+    del vels
+    # shift everything into global coordinates, trusting R and t from the projection matrices to be correct
+    for pos in range(avgperiod, nregs):
+        for i in range(pos - avgperiod + 1):
+            print("shifting", i, "into global coords")
+            avgclouds[i].points = clouds[pos].R.dot(avgclouds[i].points) + clouds[pos].t
+    pointcloud.visualise_worlds_mplotlib(*avgclouds)
+
+    del clouds
+
+    # # merge all average sets into one cloud
+    # globalavgp = np.hstack([c.points for c in avgclouds])
+    #
+    # # flatten to the x, y plane
+    # globalavgp = pointcloud.align_points_with_xy(globalavgp)
+    #
+    # # bin in x, y grid
+    # globgrid =
+
+    average_clouds(avgclouds)
 
 
 if __name__ == "__main__":
@@ -466,6 +533,19 @@ if __name__ == "__main__":
 
     # generate_world_average_new(list(range(9900, 9931, 3)))  # 9900 to 9930 inclusive (10 pairs)
     # generate_world_average_old([9900, 9903])
-    # generate_world_average_new(list(range(9900, 10000, 3)))
-    generate_world_average_new(list(range(9900, 9904, 3)))
+
+
+    initP1 = np.array([[1.88300000e+03, 0.00000000e+00, 9.10000000e+02, 0.00000000e+00],
+                       [0.00000000e+00, 1.88300000e+03, 4.90000000e+02, 0.00000000e+00],
+                       [0.00000000e+00, 0.00000000e+00, 1.00000000e+00, 0.00000000e+00]])
+    initP2 = np.array([[1.88348095e+03, -1.18549676e-01, 9.09004116e+02, -8.07573272e+02],
+                       [1.72582273e+00, 1.88372392e+03, 4.87206551e+02, 6.61298027e+02],
+                       [5.29438024e-04, 1.48277499e-03, 9.99998761e-01, -8.24083973e-01]])
+    initcloud = pointcloud.PointCloud(None, None, initP1, initP2, None, None)
+
+    # gen_world_avg_pairs_gc([9900, 9903, 9906, 9909, 9912, 9915])#, initcloud=initcloud)
+    # gen_world_avg_pairs_gc(list(range(9900, 10000, 3)))#, initcloud=initcloud)
+    gen_world_avg_pairs_gc(list(range(9900, 10100, 3)))#, initcloud=initcloud)
+    # gen_running_avg([9900, 9903, 9906, 9909], initcloud=initcloud)
+    # gen_running_avg(list(range(9900, 9904, 3)))
     # generate_world_average_old(list(range(9900, 9910, 3)))

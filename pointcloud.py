@@ -25,13 +25,13 @@ class PointCloud:
 
     def get_shaped(self):
         """
-        :return: A 3xYxX array of the points reshaped into self.imageshape
+        :return: A XxYx3 array of the points reshaped into self.imageshape
         """
-        return np.stack([
+        return np.dstack([
             self.points[0, :].reshape(self.imageshape),
             self.points[1, :].reshape(self.imageshape),
             self.points[2, :].reshape(self.imageshape)
-        ], axis=0)
+        ])
 
 
 def align_points_with_xy(points):
@@ -121,7 +121,8 @@ def visualise_worlds_mplotlib(*worlds, method="surf"):
 
     if method == "surf":
         if len(worlds) == 1:
-            X, Y, Z = worlds[0].get_shaped()
+            shaped = worlds[0].get_shaped()
+            X, Y, Z = shaped[:, :, 0], shaped[:, :, 1], shaped[:, :, 2]
             print("Z range", np.nanmin(Z), np.nanmax(Z))
             surf = ax.plot_surface(X, Y, Z, cmap=cm.hot, linewidth=0, antialiased=False,
                                    vmin=np.nanmin(Z), vmax=np.nanmax(Z))  # these limits seem to make it less
@@ -130,8 +131,9 @@ def visualise_worlds_mplotlib(*worlds, method="surf"):
             fig.colorbar(surf, extend='both')
         else:
             for i, world in enumerate(worlds):
-                X, Y, Z = world.get_shaped()
-                surf = ax.plot_surface(X, Y, Z, linewidth=0, antialiased=False) #, rcount=10, ccount=10, color=('r','g','b','y')[i])
+                shaped = world.get_shaped()
+                X, Y, Z = shaped[:, :, 0], shaped[:, :, 1], shaped[:, :, 2]
+                surf = ax.plot_surface(X, Y, Z, linewidth=0, antialiased=False, rcount=10, ccount=10)#, color=('r','g','b','y')[i])
     else:
         # method == "scatter"
         # requires heavy graphics
