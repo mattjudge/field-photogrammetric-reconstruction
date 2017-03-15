@@ -364,32 +364,19 @@ def gen_running_avg(fnums, initcloud=None):
     # pointcloud.visualise_worlds_mplotlib(avgcloud)
 
 
-def average_clouds(clouds):
+def gen_binned_cloud(points):
     detail = 5  # bins per unit
-    data = np.stack([c.points for c in clouds], axis=0)
-    xmin, ymin, zmin = np.min(data, (0, 2))
-    xmax, ymax, zmax = np.max(data, (0, 2))
-    print("data shape", data.shape)
-    print("data min", np.min(data, (0, 2)))
-    print("data max", np.max(data, (0, 2)))
 
-    data = np.hstack([c.points for c in clouds])
-    print("data shape", data.shape)
+    print("data shape", points.shape)
+
+    xmin, ymin, zmin = np.floor(np.min(points, axis=1)).astype(int)
+    xmax, ymax, zmax = np.ceil(np.max(points, axis=1)).astype(int)
+    print("data shape", points.shape)
+    print("data min", np.min(points, axis=1))
+    print("data max", np.max(points, axis=1))
 
     # print("flattening to xy plane")
     # data = pointcloud.align_points_with_xy(data)
-
-    # rounddata = np.round(data / (1/detail)) * (1/detail)  # round to nearest (1/detail)
-    # intdata[:,-1,:] = data[]# round x and y for all sets (not z)
-    # rounddata[2,:] = data[2,:]
-
-    xmin = int(np.floor(xmin))
-    ymin = int(np.floor(ymin))
-    xmax = int(np.ceil(xmax))
-    ymax = int(np.ceil(ymax))
-
-    # xshape = (xmax - xmin + 1)*detail
-    # yshape = (ymax - ymin + 1)*detail
 
     xarr, yarr = np.arange(xmin, xmax+1, 1/detail), np.arange(ymin, ymax+1, 1/detail)
     X, Y = np.meshgrid(xarr, yarr)
@@ -399,9 +386,9 @@ def average_clouds(clouds):
 
     # index data
     indexdata = np.vstack([
-        np.rint((data[0, :] - xmin) * detail),
-        np.rint((data[1, :] - ymin) * detail),
-        data[2, :]
+        np.rint((points[0, :] - xmin) * detail),
+        np.rint((points[1, :] - ymin) * detail),
+        points[2, :]
     ])
     avgz = np.zeros((yshape, xshape))
     pcount = np.zeros_like(avgz)
@@ -430,7 +417,7 @@ def average_clouds(clouds):
 
     avgcloud = pointcloud.PointCloud(np.vstack([X.flatten(), Y.flatten(), Z.flatten()]), X.shape, None, None, None, None)
     avgcloud.points = pointcloud.align_points_with_xy(avgcloud.points)
-    pointcloud.visualise_worlds_mplotlib(avgcloud)
+    return avgcloud
 
 
 def gen_world_avg_pairs_gc(fnums, initcloud=None):
@@ -476,7 +463,7 @@ def gen_world_avg_pairs_gc(fnums, initcloud=None):
 
     # generate moving average of clouds
     avgperiod = 5
-    avgclouds = []
+    avgpoints = np.ndarray((3, 0))
     for i in range(len(clouds) - (avgperiod - 1)):
         avg = np.zeros_like(clouds[i].get_shaped())
         # print("avg shape", avg.shape)
@@ -494,33 +481,21 @@ def gen_world_avg_pairs_gc(fnums, initcloud=None):
         avgcloudX = avg[:, :, 0][100:-crop, crop:-crop]
         avgcloudY = avg[:, :, 1][100:-crop, crop:-crop]
         avgcloudZ = avg[:, :, 2][100:-crop, crop:-crop]
+        avgcloudXYZ = np.vstack((avgcloudX.flat, avgcloudY.flat, avgcloudZ.flat))
 
-        avgcloud = pointcloud.PointCloud(np.vstack([avgcloudX.flatten(), avgcloudY.flatten(), avgcloudZ.flatten()]),
-                                        avgcloudX.shape, None, None, None, None)
-        avgclouds.append(avgcloud)
         # avgcloud.points = pointcloud.align_points_with_xy(avgcloud.points)
         # pointcloud.visualise_worlds_mplotlib(avgcloud)
 
+        # shift into global coordinates, trusting R and t from the projection matrices to be correct
+        pos = i + avgperiod - 1
+        avgpoints = clouds[pos].R.dot(avgpoints) + clouds[pos].t  # shift the previous values into current space
+        avgpoints = np.hstack((avgpoints, avgcloudXYZ))  # then add current points
+
     del vels
-    # shift everything into global coordinates, trusting R and t from the projection matrices to be correct
-    for pos in range(avgperiod, nregs):
-        for i in range(pos - avgperiod + 1):
-            print("shifting", i, "into global coords")
-            avgclouds[i].points = clouds[pos].R.dot(avgclouds[i].points) + clouds[pos].t
-    pointcloud.visualise_worlds_mplotlib(*avgclouds)
-
     del clouds
+    world = gen_binned_cloud(avgpoints)
+    pointcloud.visualise_worlds_mplotlib(world)
 
-    # # merge all average sets into one cloud
-    # globalavgp = np.hstack([c.points for c in avgclouds])
-    #
-    # # flatten to the x, y plane
-    # globalavgp = pointcloud.align_points_with_xy(globalavgp)
-    #
-    # # bin in x, y grid
-    # globgrid =
-
-    average_clouds(avgclouds)
 
 
 if __name__ == "__main__":
