@@ -7,6 +7,9 @@ import dtcwt.registration
 import generate_registrations
 import pointcloud
 
+# from joblib import Memory
+# mem = Memory(cachedir='./data/')
+
 
 def get_fundamental(u1, v1, u2, v2):
     u1 = u1.reshape((-1, 1))
@@ -75,7 +78,7 @@ def create_pixel_correspondences(vel):
     return np.dstack((u1shaped, v1shaped)), np.dstack((u2shaped, v2shaped))
 
 
-def estimate_projections(correspondences, P1=None, P2=None):
+def estimate_projections(correspondences):
     # points should be pre-cropped to ensure good data points (otherwise E becomes unstable)
     corr1, corr2 = correspondences
     imshape = corr1[:, :, 0].shape
@@ -101,30 +104,12 @@ def estimate_projections(correspondences, P1=None, P2=None):
     # print((mask.size - np.sum(mask)) / mask.size)
 
     print("recovering pose")
-    if P1 is None or P2 is None:
-        # retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=mask)
-        # TODO: refine sampling method
-        retval, R, t, mask = cv2.recoverPose(E, w1[:,::100].transpose(), w2[:,::100].transpose(), K, mask=None)
-        P1, P2 = get_projections_from_rt(K, R, t)
-    else:
-        # closest to last one
-        R1, R2, t = cv2.decomposeEssentialMat(E)
-        Rtcombs = (
-            (R1, t),
-            (R1, -t),
-            (R2, t),
-            (R2, -t),
-        )
-        projs = list(map(lambda rt: get_projections_from_rt(K, *rt), Rtcombs))
-        diffs = list(map(
-            lambda x: np.linalg.norm(P1-x[0]) + np.linalg.norm(P2-x[1]), projs
-        ))
-        print(diffs)
-        P1, P2 = projs[np.argmin(diffs)]
-        R, t = Rtcombs[np.argmin(diffs)]
-
-    print("R", R)
-    print("t", t)
+    # retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=mask)
+    # TODO: refine sampling method
+    retval, R, t, mask = cv2.recoverPose(E, w1[:,::100].transpose(), w2[:,::100].transpose(), K, mask=None)
+    P1, P2 = get_projections_from_rt(K, R, t)
+    # print("R", R)
+    # print("t", t)
     # print("P1", P1)
     # print("P2", P2)
 
@@ -420,7 +405,7 @@ def gen_binned_cloud(points):
     return avgcloud
 
 
-def gen_world_avg_pairs_gc(fnums, initcloud=None):
+def gen_world_avg_pairs_gc(fnums):
     # generate frame number pairs
     fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
 
@@ -437,15 +422,10 @@ def gen_world_avg_pairs_gc(fnums, initcloud=None):
 
     # generate pair clouds
     clouds = []
-    cloud = initcloud
     for vel in vels:
-        cloud = None
         corr = create_pixel_correspondences(vel)
         # print(vel.shape)
-        if cloud is None:
-            P1, P2, R, t = estimate_projections(corr, None, None)
-        else:
-            P1, P2, R, t = estimate_projections(corr, cloud.P1, cloud.P2)
+        P1, P2, R, t = estimate_projections(corr)
 
         cropcorr1 = corr[0][400:-50, 50:-50, :]
         cropcorr2 = corr[1][400:-50, 50:-50, :]
@@ -494,6 +474,7 @@ def gen_world_avg_pairs_gc(fnums, initcloud=None):
     del vels
     del clouds
     world = gen_binned_cloud(avgpoints)
+    del avgpoints
     pointcloud.visualise_worlds_mplotlib(world)
 
 
@@ -546,8 +527,9 @@ if __name__ == "__main__":
     initcloud = pointcloud.PointCloud(None, None, initP1, initP2, None, None)
 
     # gen_world_avg_pairs_gc([9900, 9903, 9906, 9909, 9912, 9915])#, initcloud=initcloud)
-    # gen_world_avg_pairs_gc(list(range(9900, 9930, 3)))#, initcloud=initcloud)
-    gen_world_avg_pairs_gc(list(range(9900, 10000, 3)))#, initcloud=initcloud)
+    gen_world_avg_pairs_gc(list(range(9900, 9920, 3)))#, initcloud=initcloud)
+    # gen_world_avg_pairs_gc(list(range(9900, 10000, 3)))#, initcloud=initcloud)
+    # gen_world_avg_pairs_gc(list(range(9900, 10200, 3)))#, initcloud=initcloud)
     # gen_world_avg_pairs_gc(list(range(9900, 10100, 3)))#, initcloud=initcloud)
     # gen_running_avg([9900, 9903, 9906, 9909], initcloud=initcloud)
     # gen_running_avg(list(range(9900, 9904, 3)))
