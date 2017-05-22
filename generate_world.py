@@ -300,7 +300,8 @@ def generate_world(start, stop):
     # bin, flatten, and render
     world = gen_binned_cloud(avgpoints)
     del avgpoints
-    pointcloud.visualise_worlds_mplotlib(world)  #, fname='test_save.png')
+    # pointcloud.visualise_worlds_mplotlib(world)  #, fname='test_save.png')
+    pointcloud.visualise_heatmap(world, fname='{}_{}_singletrain_heatmap.png'.format(start, stop))
 
 
 def generate_world3(start, stop):
@@ -366,8 +367,11 @@ def generate_world3(start, stop):
     # bin, flatten, and render
     world = gen_binned_cloud(avgpoints)
     del avgpoints
-    pointcloud.visualise_worlds_mplotlib(world)
+    # pointcloud.visualise_worlds_mplotlib(world)
+    pointcloud.visualise_heatmap(world, fname='{}_{}_tripletrain_heatmap.png'.format(start, stop))
 
 
 if __name__ == "__main__":
-    generate_world3(9900, 9920)
+    # generate_world3(9900, 9920)
+    # generate_world(9900, 9920)
+    generate_world(9900, 9960)

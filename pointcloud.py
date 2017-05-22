@@ -3,6 +3,7 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 import matplotlib.pyplot as plt
+from scipy import interpolate
 
 
 class PointCloud:
@@ -111,7 +112,41 @@ def set_axes_equal(ax):
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
 
-def visualise_worlds_mplotlib(*worlds, method="surf"):
+def visualise_heatmap(world, fname=None):
+    detail = 5
+    # points = world.points
+    points = world.points[:, ~np.isnan(world.points[-1,:])]
+
+    xmin, ymin, zmin = np.floor(np.min(points, axis=1)).astype(int)
+    xmax, ymax, zmax = np.ceil(np.max(points, axis=1)).astype(int)
+    print("data shape", points.shape)
+    print("data min", np.min(points, axis=1))
+    print("data max", np.max(points, axis=1))
+
+    xarr, yarr = np.arange(xmin, xmax + 1, 1 / detail), np.arange(ymin, ymax + 1, 1 / detail)
+    X, Y = np.meshgrid(xarr, yarr)
+    yshape, xshape = X.shape
+    print("X shape", X.shape)
+    print("Y shape", Y.shape)
+
+    Z = interpolate.griddata(np.vstack([points[0, :], points[1, :]]).T, points[2, :].T,
+                             np.vstack([X.flatten(), Y.flatten()]).T, method='linear'
+                             ).reshape(X.shape)
+    print("Z shape", Z.shape)
+    fig = plt.figure()
+    ax = fig.gca()
+    ax.set_aspect('equal')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    plt.imshow(Z, cmap='gray')
+    plt.colorbar()
+    if fname is not None:
+        plt.savefig(fname)
+    plt.show()
+
+
+
+def visualise_worlds_mplotlib(*worlds, method="surf", fname=None):
     fig = plt.figure()
     ax = fig.gca(projection='3d')
     ax.set_aspect('equal')
@@ -142,6 +177,8 @@ def visualise_worlds_mplotlib(*worlds, method="surf"):
             ax.scatter(X, Y, Z, linewidth=0, antialiased=False, marker="o")
 
     set_axes_equal(ax)
+    if fname is not None:
+        plt.savefig(fname)
     plt.show()
     return plt
 
