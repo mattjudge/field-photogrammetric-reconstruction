@@ -5,7 +5,7 @@ from scipy import interpolate, linalg
 import dtcwt.registration
 
 import generate_registrations
-import pointcloud
+import pointcloud, video
 
 # from joblib import Memory
 # mem = Memory(cachedir='./data/')
@@ -215,11 +215,11 @@ def gen_binned_cloud(points):
     return avgcloud
 
 
-def gen_world_avg_pairs_gc(fnums):
+def gen_world_avg_pairs_gc(vid, fnums):
     # generate frame number pairs
     fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
 
-    vel0 = generate_registrations.load_velocity_fields(*fnumpairs[0])
+    vel0 = generate_registrations.load_velocity_fields(vid, *fnumpairs[0])
     # generate pair velocity fields
     # vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnumpairs)))
     print(vel0.shape)
@@ -245,7 +245,7 @@ def gen_world_avg_pairs_gc(fnums):
     clouds = []
     vels = []
     for fnumpair in fnumpairs[:avgperiod-1]:
-        vel = generate_registrations.load_velocity_fields(*fnumpair)[:, 50:-50, 50:-50]
+        vel = generate_registrations.load_velocity_fields(vid, *fnumpair)[:, 50:-50, 50:-50]
         vels.append(vel)
         corr = create_pixel_correspondences(vel)
         # print(vel.shape)
@@ -256,8 +256,9 @@ def gen_world_avg_pairs_gc(fnums):
     for i in range(nregs - (avgperiod - 1)):
         print("i, lenclouds", i, len(clouds))
         vel = generate_registrations.load_velocity_fields(
-                *fnumpairs[i+avgperiod-1]
-            )[:, 50:-50, 50:-50]
+            vid,
+            *fnumpairs[i+avgperiod-1]
+        )[:, 50:-50, 50:-50]
         vels.append(vel)
         corr = create_pixel_correspondences(vel)
         # print(vel.shape)
@@ -306,8 +307,8 @@ def gen_world_avg_pairs_gc(fnums):
     return avgpoints
 
 
-def generate_world(start, stop):
-    avgpoints = gen_world_avg_pairs_gc(list(range(start, stop, 3)))
+def generate_world(vid, start, stop):
+    avgpoints = gen_world_avg_pairs_gc(vid, list(range(start, stop, 3)))
 
     # bin, flatten, and render
     world = gen_binned_cloud(avgpoints)
@@ -316,7 +317,7 @@ def generate_world(start, stop):
     pointcloud.visualise_heatmap(world, fname='{}_{}_singletrain_heatmap'.format(start, stop))
 
 
-def generate_world3(start, stop):
+def generate_world3(vid, start, stop):
     f1 = list(range(start,   stop-2, 3))
     f2 = list(range(start+1, stop-1, 3))
     f3 = list(range(start+2, stop,   3))
@@ -331,7 +332,7 @@ def generate_world3(start, stop):
     finalpair = f3[-2:]
     print(finalpair)
 
-    vel = generate_registrations.load_velocity_fields(*finalpair)[:, 50:-50, 50:-50]
+    vel = generate_registrations.load_velocity_fields(vid, *finalpair)[:, 50:-50, 50:-50]
     vel1 = vel * 2/3
     vel2 = vel * 1/3
 
@@ -384,8 +385,13 @@ def generate_world3(start, stop):
 
 
 if __name__ == "__main__":
-    # generate_world3(9900, 9920)
-    # generate_world(9900, 9920)
-    # generate_world(13100, 13200)
+    vid = video.Video(r"../../../../../YUNC0001.mp4")
+    print(vid.fname)
+    print(vid.shape)
+    print(vid.fps)
+
+    # generate_world3(vid, 9900, 9920)
+    generate_world(vid, 9900, 9920)
+    # generate_world3(13100, 13200)
     # generate_world3(14550, 14800)
-    generate_world3(15000, 15200)
+    # generate_world3(15000, 15200)
