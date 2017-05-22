@@ -86,8 +86,8 @@ def estimate_projections(correspondences):
 
     w1 = np.vstack((corr1[:, :, 0].flat, corr1[:, :, 1].flat))
     w2 = np.vstack((corr2[:, :, 0].flat, corr2[:, :, 1].flat))
-    print("w1 as int", w1.astype(int))
-    print("w2 as int", w2.astype(int))
+    # print("w1 as int", w1.astype(int))
+    # print("w2 as int", w2.astype(int))
 
     # TODO: ensure shapex, shapey are correct estimations given cropping of vels
     fku = 1883  # estimated
@@ -97,7 +97,7 @@ def estimate_projections(correspondences):
 
     # E, mask = cv2.findEssentialMat(w1.transpose(), w2.transpose(), 2000, (shapey//2, shapex//2))
     E, mask = cv2.findEssentialMat(w1.transpose(), w2.transpose(), K)
-    print("E", E)
+    # print("E", E)
     # print("mask", mask.T)
     # print(np.sum(mask), ":", mask.size)
     # print(mask.size - np.sum(mask))
@@ -127,8 +127,8 @@ def generate_cloud(correspondences, P1, P2, R, t):
 
     w1 = np.vstack((corr1[:, :, 0].flat, corr1[:, :, 1].flat))
     w2 = np.vstack((corr2[:, :, 0].flat, corr2[:, :, 1].flat))
-    print("w1 as int", w1.astype(int))
-    print("w2 as int", w2.astype(int))
+    # print("w1 as int", w1.astype(int))
+    # print("w2 as int", w2.astype(int))
 
     print("triangulating vertices")
     points = cv2.triangulatePoints(P1.astype(float), P2.astype(float), w1.astype(float), w2.astype(float))
@@ -138,15 +138,15 @@ def generate_cloud(correspondences, P1, P2, R, t):
 
     points /= points[-1, :]
 
-    check1 = P1.dot(points[:, points.shape[1] // 4])
-    check1 /= check1[-1]
-    print("check", check1, w1[:, points.shape[1] // 4])
-
-    check2 = P2.dot(points[:, points.shape[1] // 4])
-    check2 /= check2[-1]
-    print("check", check2, w2[:, points.shape[1] // 4])
-
-    print("world shape", points.shape)
+    # check1 = P1.dot(points[:, points.shape[1] // 4])
+    # check1 /= check1[-1]
+    # print("check", check1, w1[:, points.shape[1] // 4])
+    #
+    # check2 = P2.dot(points[:, points.shape[1] // 4])
+    # check2 /= check2[-1]
+    # print("check", check2, w2[:, points.shape[1] // 4])
+    #
+    # print("world shape", points.shape)
 
     return pointcloud.PointCloud(points[:-1, :], imshape, P1, P2, R, t)
 
@@ -248,7 +248,9 @@ def gen_world_avg_pairs_gc(fnums):
         P1, P2, R, t = estimate_projections(corr)
         cloud = generate_cloud(corr, P1, P2, R, t)
         clouds.append(cloud)
+    cloudshape = clouds[0].get_shaped().shape
     for i in range(nregs - (avgperiod - 1)):
+        print("i, lenclouds", i, len(clouds))
         corr = create_pixel_correspondences(vels[i+avgperiod-1])
         # print(vel.shape)
         P1, P2, R, t = estimate_projections(corr)
@@ -257,7 +259,8 @@ def gen_world_avg_pairs_gc(fnums):
 
         assert len(clouds) == avgperiod  # todo: remove check
 
-        avg = np.zeros_like(clouds[i].get_shaped())
+        avg = np.zeros(cloudshape)
+        # avg = np.zeros_like(clouds[i].get_shaped())
         # print("avg shape", avg.shape)
         for j in range(avgperiod):
             index = i + j
@@ -284,7 +287,8 @@ def gen_world_avg_pairs_gc(fnums):
         avgpoints = np.hstack((avgpoints, avgcloudXYZ))  # then add current points
 
         # move clouds stack along
-        clouds = clouds[:-1]
+        # clouds = clouds[:-1]
+        clouds = clouds[1:]
 
     # del vels
     # del clouds
