@@ -141,8 +141,14 @@ def visualise_heatmap(world, fname=None):
     plt.imshow(Z, cmap='gray')
     plt.colorbar()
     if fname is not None:
-        plt.savefig(fname)
+        plt.savefig('{}.png'.format(fname))
+        np.savetxt(
+            '{}.csv'.format(fname),
+            np.vstack([X.flatten(), Y.flatten(), Z.flatten()]).T,
+            delimiter=','
+        )
     plt.show()
+    return plt
 
 
 
