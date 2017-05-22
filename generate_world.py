@@ -219,30 +219,34 @@ def gen_world_avg_pairs_gc(fnums):
     # generate frame number pairs
     fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
 
+    vel0 = generate_registrations.load_velocity_fields(*fnumpairs[0])
     # generate pair velocity fields
-    vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnumpairs)))
-    print(vels.shape)
+    # vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnumpairs)))
+    print(vel0.shape)
     # crop vels
-    vels = vels[:, :, 50:-50, 50:-50]
-    print(vels.shape)
+    vel0 = vel0[:, 50:-50, 50:-50]
+    print(vel0.shape)
 
-    nregs = vels.shape[0]
-    imgshape = vels[0][0].shape
+    nregs = len(fnumpairs)
+    imgshape = vel0[0].shape
     shapey, shapex = imgshape  # todo: move before cropping
 
-    velshape = vels[0][0].shape
+    velshape = vel0[0].shape
     X, Y = np.meshgrid(np.arange(velshape[1], dtype=np.float32),
                        np.arange(velshape[0], dtype=np.float32))
 
     # print("cloudshape", clouds[0].imageshape)
-    print("velshape", vels[0, 0, :, :].shape)
+    print("velshape", vel0[0, :, :].shape)
 
     # generate moving average of clouds
     avgperiod = 5
     avgpoints = np.ndarray((3, 0))
     # generate pair clouds
     clouds = []
-    for vel in vels[:avgperiod-1]:
+    vels = []
+    for fnumpair in fnumpairs[:avgperiod-1]:
+        vel = generate_registrations.load_velocity_fields(*fnumpair)[:, 50:-50, 50:-50]
+        vels.append(vel)
         corr = create_pixel_correspondences(vel)
         # print(vel.shape)
         P1, P2, R, t = estimate_projections(corr)
@@ -251,7 +255,11 @@ def gen_world_avg_pairs_gc(fnums):
     cloudshape = clouds[0].get_shaped().shape
     for i in range(nregs - (avgperiod - 1)):
         print("i, lenclouds", i, len(clouds))
-        corr = create_pixel_correspondences(vels[i+avgperiod-1])
+        vel = generate_registrations.load_velocity_fields(
+                *fnumpairs[i+avgperiod-1]
+            )[:, 50:-50, 50:-50]
+        vels.append(vel)
+        corr = create_pixel_correspondences(vel)
         # print(vel.shape)
         P1, P2, R, t = estimate_projections(corr)
         cloud = generate_cloud(corr, P1, P2, R, t)
@@ -263,10 +271,9 @@ def gen_world_avg_pairs_gc(fnums):
         # avg = np.zeros_like(clouds[i].get_shaped())
         # print("avg shape", avg.shape)
         for j in range(avgperiod):
-            index = i + j
             p = clouds[j].get_shaped()
-            mapX = (X + vels[index, 0, :, :] * shapex).astype('float32')
-            mapY = (Y + vels[index, 1, :, :] * shapey).astype('float32')
+            mapX = (X + vels[j][0, :, :] * shapex).astype('float32')
+            mapY = (Y + vels[j][1, :, :] * shapey).astype('float32')
             avg = p + cv2.remap(avg, mapX, mapY,
                             interpolation=cv2.INTER_LINEAR,  # INTER_LANCZOS4,
                             borderMode=cv2.BORDER_TRANSPARENT)
@@ -289,6 +296,7 @@ def gen_world_avg_pairs_gc(fnums):
         # move clouds stack along
         # clouds = clouds[:-1]
         clouds = clouds[1:]
+        vels = vels[1:]
 
     # del vels
     # del clouds
@@ -376,6 +384,6 @@ def generate_world3(start, stop):
 
 
 if __name__ == "__main__":
-    # generate_world3(9900, 9920)
+    generate_world3(9900, 9920)
     # generate_world(9900, 9920)
-    generate_world(9900, 9960)
+    # generate_world(9900, 9960)
