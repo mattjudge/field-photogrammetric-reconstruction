@@ -101,7 +101,7 @@ def estimate_projections(correspondences):
     # print(mask.size - np.sum(mask))
     # print((mask.size - np.sum(mask)) / mask.size)
 
-    print("recovering pose")
+    # print("recovering pose")
     # retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=mask)
     # TODO: refine sampling method
     retval, R, t, mask = cv2.recoverPose(E, w1[:,::100].transpose(), w2[:,::100].transpose(), K, mask=None)
@@ -128,10 +128,10 @@ def generate_cloud(correspondences, P1, P2, R, t):
     # print("w1 as int", w1.astype(int))
     # print("w2 as int", w2.astype(int))
 
-    print("triangulating vertices")
+    # print("triangulating vertices")
     points = cv2.triangulatePoints(P1.astype(float), P2.astype(float), w1.astype(float), w2.astype(float))
     # world = cv2.triangulatePoints(P, P2, w1, w2)  # crashes, bug in opencv
-    print("triangulated.")
+    # print("triangulated.")
     # world[:, mask.transpose()] = float('nan')
 
     points /= points[-1, :]
@@ -187,7 +187,7 @@ def gen_binned_cloud(points):
     assert np.sum(pcount) == points.shape[1]
     print("Binned {} points".format(np.sum(pcount)))
 
-    pvals = pcount > 5
+    pvals = pcount > 5  # mask to filter bins by minimum number of child points
     avgz[pvals] /= pcount[pvals]
     print("Accepted {} points ({}%)".format(
         np.sum(pcount[pvals]),
@@ -197,8 +197,12 @@ def gen_binned_cloud(points):
     print("X shape", X.shape)
 
     print("Interpolating data")
+    gridvals = np.vstack([
+        X[:-1, :-1][pvals],  # remove last column and row as they are upper bounds
+        Y[:-1, :-1][pvals]  # and filter by pvals mask
+    ]).T + 0.5 * 1/detail  # offset for bin center
     Z = interpolate.griddata(
-        np.vstack([X[pvals], Y[pvals]]).T + 0.5 * 1/detail,  # offset for bin center
+        gridvals,
         avgz[pvals].T,
         np.vstack([X.flatten(), Y.flatten()]).T, method='linear')
 
@@ -238,7 +242,13 @@ def gen_world_avg_pairs_gc(vid, fnums):
     # generate pair clouds
     clouds = []
     vels = []
+
+    print("Processing frames...")
+    i = 0
     for fnumpair in fnumpairs[:avgperiod-1]:
+        progress = int(i / nregs * 100)
+        print("\rProgress: {}%".format(progress), end='')
+        i += 1
         vel = generate_registrations.load_velocity_fields(vid, *fnumpair)[:, 50:-50, 50:-50]
         vels.append(vel)
         corr = create_pixel_correspondences(vel)
@@ -246,9 +256,14 @@ def gen_world_avg_pairs_gc(vid, fnums):
         P1, P2, R, t = estimate_projections(corr)
         cloud = generate_cloud(corr, P1, P2, R, t)
         clouds.append(cloud)
+
     cloudshape = clouds[0].get_shaped().shape
+
     for i in range(nregs - (avgperiod - 1)):
-        print("i, lenclouds", i, len(clouds))
+        progress = int((i + avgperiod) / nregs * 100)
+        print("\rProgress: {}%".format(progress), end='')
+
+        # print("i, lenclouds", i, len(clouds))
         vel = generate_registrations.load_velocity_fields(
             vid,
             *fnumpairs[i+avgperiod-1]
@@ -275,7 +290,7 @@ def gen_world_avg_pairs_gc(vid, fnums):
         avg /= avgperiod
 
         crop = 50
-        print("avg shape", avg.shape)
+        # print("avg shape", avg.shape)
         avgcloudX = avg[400:-crop, crop:-crop, 0]
         avgcloudY = avg[400:-crop, crop:-crop, 1]
         avgcloudZ = avg[400:-crop, crop:-crop, 2]
@@ -293,6 +308,8 @@ def gen_world_avg_pairs_gc(vid, fnums):
         clouds = clouds[1:]
         vels = vels[1:]
 
+    print("\nProcessed frames")
+
     return avgpoints
 
 
@@ -303,7 +320,7 @@ def generate_world(vid, start, stop):
     world = gen_binned_cloud(avgpoints)
     del avgpoints
     # pointcloud.visualise_worlds_mplotlib(world)  #, fname='test_save.png')
-    pointcloud.visualise_heatmap(world, fname='{}_{}_singletrain_heatmap'.format(start, stop))
+    pointcloud.visualise_heatmap(world, fname='./output/{}_{}_singletrain_heatmap'.format(start, stop))
 
 
 def multiprocfunc(f):
@@ -317,6 +334,7 @@ def generate_world3(vid, start, stop):
     f3 = list(range(start+2, stop,   3))
     print(f1, f2, f3)
 
+    print("Starting multiprocessing pool")
     with multiprocessing.Pool() as p:
         points1, points2, points3 = p.map(
             multiprocfunc,
@@ -349,7 +367,7 @@ def generate_world3(vid, start, stop):
     world = gen_binned_cloud(avgpoints)
     del avgpoints
     # pointcloud.visualise_worlds_mplotlib(world)
-    pointcloud.visualise_heatmap(world, fname='{}_{}_tripletrain_multi_heatmap'.format(start, stop))
+    pointcloud.visualise_heatmap(world, fname='./output/{}_{}_tripletrain_multi_heatmap'.format(start, stop))
 
 
 if __name__ == "__main__":

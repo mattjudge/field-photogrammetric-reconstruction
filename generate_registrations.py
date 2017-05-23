@@ -9,7 +9,7 @@ import pickle
 from dtcwt.numpy import Transform2d
 import dtcwt.registration as reg
 
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
 
 
 def take_transform(frame):
