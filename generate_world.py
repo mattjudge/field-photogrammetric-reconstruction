@@ -1,15 +1,12 @@
 
 import numpy as np
 import cv2
-from scipy import interpolate, linalg
+from scipy import interpolate
 import multiprocessing
-import dtcwt.registration
 
 import generate_registrations
-import pointcloud, video
-
-# from joblib import Memory
-# mem = Memory(cachedir='./data/')
+import pointcloud
+import video
 
 
 def get_fundamental(u1, v1, u2, v2):
@@ -152,13 +149,6 @@ def generate_cloud(correspondences, P1, P2, R, t):
     return pointcloud.PointCloud(points[:-1, :], imshape, P1, P2, R, t)
 
 
-def gen_moving_avg(correspondences, clouds):
-    # generates a "moving average"
-    # beware that initial frames become increasingly "blurred" over a greater number of input frames
-    # should only be used for small numbers of frames
-    pass
-
-
 def gen_binned_cloud(points):
     detail = 5  # bins per unit
 
@@ -170,43 +160,47 @@ def gen_binned_cloud(points):
     print("data min", np.min(points, axis=1))
     print("data max", np.max(points, axis=1))
 
-    # print("flattening to xy plane")
-    # data = pointcloud.align_points_with_xy(data)
-
-    xarr, yarr = np.arange(xmin, xmax+1, 1/detail), np.arange(ymin, ymax+1, 1/detail)
+    xarr, yarr = np.arange(xmin, xmax+1, 1/detail), \
+                 np.arange(ymin, ymax+1, 1/detail)
     X, Y = np.meshgrid(xarr, yarr)
     yshape, xshape = X.shape
     print("X shape", X.shape)
     print("Y shape", Y.shape)
 
-    # index data
-    indexdata = np.vstack([
-        np.rint((points[0, :] - xmin) * detail),
-        np.rint((points[1, :] - ymin) * detail),
-        points[2, :]
-    ])
-    avgz = np.zeros((yshape, xshape))
-    pcount = np.zeros_like(avgz)
-    print("indexdata min", np.min(indexdata, 1))
-    print("indexdata max", np.max(indexdata, 1))
+    avgz, xedges, yedges = np.histogram2d(
+        points[0, :], points[1, :],
+        bins=(xarr, yarr),
+        # bins=(xmax-xmin, ymax-ymin),
+        range=None, normed=False,
+        weights=points[2, :]
+    )
+    pcount, _, _ = np.histogram2d(
+        points[0, :], points[1, :],
+        bins=(xarr, yarr),
+        # bins=(xmax - xmin, ymax - ymin),
+        range=None, normed=False,
+        weights=None
+    )
+    avgz = avgz.T
+    pcount = pcount.T
 
-    print("binning data")
-    for x, y, z in indexdata.T:
-        i, j = int(x), int(y)
-        avgz[j, i] += z
-        pcount[j, i] += 1
+    assert np.sum(pcount) == points.shape[1]
+    print("Binned {} points".format(np.sum(pcount)))
 
-    pvals = pcount > 3
+    pvals = pcount > 5
     avgz[pvals] /= pcount[pvals]
-    print("tot pcount", np.sum(pcount))
-    print("accepted bins", np.sum(pcount[pvals]), pcount[pvals].shape)
+    print("Accepted {} points ({}%)".format(
+        np.sum(pcount[pvals]),
+        int(np.sum(pcount[pvals]) / np.sum(pcount) * 100)))
 
-    print("interpolating data")
-    # f = interpolate.interp2d(X[pvals], Y[pvals], avgz[pvals], kind='cubic')
-    # Z = f(xarr, yarr)
+    print("hist shape", pcount.shape)
+    print("X shape", X.shape)
 
-    # Z = interpolate.griddata(data[:-1,:].T, data[-1,:].T, np.vstack([X.flatten(), Y.flatten()]).T, method='linear')
-    Z = interpolate.griddata(np.vstack([X[pvals], Y[pvals]]).T, avgz[pvals].T, np.vstack([X.flatten(), Y.flatten()]).T, method='linear')
+    print("Interpolating data")
+    Z = interpolate.griddata(
+        np.vstack([X[pvals], Y[pvals]]).T + 0.5 * 1/detail,  # offset for bin center
+        avgz[pvals].T,
+        np.vstack([X.flatten(), Y.flatten()]).T, method='linear')
 
     print("Z shape", Z.shape)
 
@@ -299,11 +293,6 @@ def gen_world_avg_pairs_gc(vid, fnums):
         clouds = clouds[1:]
         vels = vels[1:]
 
-    # del vels
-    # del clouds
-    # world = gen_binned_cloud(avgpoints)
-    # del avgpoints
-    # pointcloud.visualise_worlds_mplotlib(world)
     return avgpoints
 
 
@@ -318,7 +307,7 @@ def generate_world(vid, start, stop):
 
 
 def multiprocfunc(f):
-    vidl = video.Video(vid.fname)
+    vidl = video.Video(vid.fname)  # todo: don't rely on vid from global
     return gen_world_avg_pairs_gc(vidl, f)
 
 
@@ -334,7 +323,7 @@ def generate_world3(vid, start, stop):
             (f1, f2, f3)
         )
 
-    ## transform points to last frame
+    # # transform points to last frame
     # interpolate between final pair
     finalpair = f3[-2:]
     print(finalpair)
@@ -344,31 +333,7 @@ def generate_world3(vid, start, stop):
     vel2 = vel * 1/3
 
     imgshape = vel[0].shape
-    shapey, shapex = imgshape  #todo: move before cropping
-
-    # generate pair clouds
-    # corr1 = create_pixel_correspondences(vel1)
-    # corr2 = create_pixel_correspondences(vel2)
-    # # print(vel.shape)
-    # _, _, R1, t1 = estimate_projections(corr1)
-    # _, _, R2, t2 = estimate_projections(corr2)
-    #
-    # print("R1, t1", R1, t1)
-    # print("R2, t2", R2, t2)
-    #
-    # # avgpoints = points1
-    # # avgpoints = R1.dot(avgpoints) + t1
-    # # avgpoints = np.hstack((avgpoints, points2))
-    # # avgpoints = R2.dot(avgpoints) + t2
-    # # avgpoints = np.hstack((avgpoints, points3))
-    #
-    # avgpoints = np.hstack((
-    #     # points1,
-    #     # points2,
-    #     R1.dot(points1) + t1,
-    #     R2.dot(points2) + t2,
-    #     points3
-    # ))
+    shapey, shapex = imgshape  # todo: move before cropping
 
     # Assume R = eye  # todo: cube root homogeneous matrix
     corr = create_pixel_correspondences(vel)
@@ -379,10 +344,6 @@ def generate_world3(vid, start, stop):
         points3
     ))
     print("R, T", R, T)
-
-
-    # cloud1 = pointcloud.PointCloud(pointcloud.align_points_with_xy(avgcloud.points)
-    # pointcloud.visualise_worlds_mplotlib(avgcloud)
 
     # bin, flatten, and render
     world = gen_binned_cloud(avgpoints)
@@ -397,10 +358,10 @@ if __name__ == "__main__":
     print(vid.shape)
     print(vid.fps)
 
-    generate_world3(vid, 9900, 9920)
+    # generate_world3(vid, 9900, 9920)
     # generate_world3(vid, 20750, 20850)
     # generate_world3(vid, 20750, 20800)
-    # generate_world(vid, 9900, 9920)
+    generate_world3(vid, 9900, 9920)
     # generate_world3(13100, 13200)
-    # generate_world3(14550, 14800)
+    # generate_world3(vid, 14550, 14610)
     # generate_world3(15000, 15200)
