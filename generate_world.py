@@ -2,6 +2,7 @@
 import numpy as np
 import cv2
 from scipy import interpolate, linalg
+import multiprocessing
 import dtcwt.registration
 
 import generate_registrations
@@ -156,7 +157,6 @@ def gen_moving_avg(correspondences, clouds):
     # beware that initial frames become increasingly "blurred" over a greater number of input frames
     # should only be used for small numbers of frames
     pass
-
 
 
 def gen_binned_cloud(points):
@@ -317,15 +317,22 @@ def generate_world(vid, start, stop):
     pointcloud.visualise_heatmap(world, fname='{}_{}_singletrain_heatmap'.format(start, stop))
 
 
+def multiprocfunc(f):
+    vidl = video.Video(vid.fname)
+    return gen_world_avg_pairs_gc(vidl, f)
+
+
 def generate_world3(vid, start, stop):
     f1 = list(range(start,   stop-2, 3))
     f2 = list(range(start+1, stop-1, 3))
     f3 = list(range(start+2, stop,   3))
     print(f1, f2, f3)
 
-    points1 = gen_world_avg_pairs_gc(f1)
-    points2 = gen_world_avg_pairs_gc(f2)
-    points3 = gen_world_avg_pairs_gc(f3)
+    with multiprocessing.Pool() as p:
+        points1, points2, points3 = p.map(
+            multiprocfunc,
+            (f1, f2, f3)
+        )
 
     ## transform points to last frame
     # interpolate between final pair
@@ -381,7 +388,7 @@ def generate_world3(vid, start, stop):
     world = gen_binned_cloud(avgpoints)
     del avgpoints
     # pointcloud.visualise_worlds_mplotlib(world)
-    pointcloud.visualise_heatmap(world, fname='{}_{}_tripletrain_heatmap'.format(start, stop))
+    pointcloud.visualise_heatmap(world, fname='{}_{}_tripletrain_multi_heatmap'.format(start, stop))
 
 
 if __name__ == "__main__":
@@ -390,8 +397,10 @@ if __name__ == "__main__":
     print(vid.shape)
     print(vid.fps)
 
-    # generate_world3(vid, 9900, 9920)
-    generate_world(vid, 9900, 9920)
+    generate_world3(vid, 9900, 9920)
+    # generate_world3(vid, 20750, 20850)
+    # generate_world3(vid, 20750, 20800)
+    # generate_world(vid, 9900, 9920)
     # generate_world3(13100, 13200)
     # generate_world3(14550, 14800)
     # generate_world3(15000, 15200)
