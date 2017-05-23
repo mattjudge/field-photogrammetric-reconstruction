@@ -1,12 +1,5 @@
 import cv2
 
-# constants found in
-# https://github.com/opencv/opencv/blob/e3ae36dcb3c1d523802f8642e5c3984db43637c4/modules/python/src2/defs
-CV_CAP_PROP_POS_FRAMES = 1
-CV_CAP_PROP_FRAME_WIDTH = 3
-CV_CAP_PROP_FRAME_HEIGHT = 4
-CV_CAP_PROP_FPS = 5
-
 
 class Video:
     def __init__(self, fname=None):
@@ -20,14 +13,14 @@ class Video:
     def open(self, fname):
         self.fname = fname
         self.vidcap = cv2.VideoCapture(self.fname)
-        self.fps = self.vidcap.get(CV_CAP_PROP_FPS)
+        self.fps = self.vidcap.get(cv2.CAP_PROP_FPS)
         self.shape = (
-            int(self.vidcap.get(CV_CAP_PROP_FRAME_HEIGHT)),
-            int(self.vidcap.get(CV_CAP_PROP_FRAME_WIDTH))
+            int(self.vidcap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            int(self.vidcap.get(cv2.CAP_PROP_FRAME_WIDTH))
         )
 
     def get_frame_number(self, fnum):
-        self.vidcap.set(CV_CAP_PROP_POS_FRAMES, fnum)
+        self.vidcap.set(cv2.CAP_PROP_POS_FRAMES, fnum)
         success, frame = self.vidcap.read()
         if not success:
             raise LookupError("Error reading frame from video file")
