@@ -149,10 +149,9 @@ def generate_cloud(correspondences, P1, P2, R, t):
     return pointcloud.PointCloud(points[:-1, :], imshape, P1, P2, R, t)
 
 
-def gen_binned_cloud(points):
-    detail = 5  # bins per unit
-
-    print("data shape", points.shape)
+def gen_binned_points(points, detail=5, minpointcount=6):
+    # detail = bins per unit
+    # minpointcount = min number of points in a bin for that bin to be accepted
 
     xmin, ymin, zmin = np.floor(np.min(points, axis=1)).astype(int)
     xmax, ymax, zmax = np.ceil(np.max(points, axis=1)).astype(int)
@@ -163,54 +162,42 @@ def gen_binned_cloud(points):
     xarr, yarr = np.arange(xmin, xmax+1, 1/detail), \
                  np.arange(ymin, ymax+1, 1/detail)
     X, Y = np.meshgrid(xarr, yarr)
-    yshape, xshape = X.shape
-    print("X shape", X.shape)
-    print("Y shape", Y.shape)
+    print("X,Y shape", X.shape, Y.shape)
 
     avgz, xedges, yedges = np.histogram2d(
         points[0, :], points[1, :],
         bins=(xarr, yarr),
-        # bins=(xmax-xmin, ymax-ymin),
         range=None, normed=False,
         weights=points[2, :]
     )
     pcount, _, _ = np.histogram2d(
         points[0, :], points[1, :],
         bins=(xarr, yarr),
-        # bins=(xmax - xmin, ymax - ymin),
         range=None, normed=False,
         weights=None
     )
-    avgz = avgz.T
+    avgz = avgz.T  # np.histogram2d returns with x on first dim (unconventional)
     pcount = pcount.T
+    print("binned shape", avgz.shape)
 
     assert np.sum(pcount) == points.shape[1]
-    print("Binned {} points".format(np.sum(pcount)))
+    print("Binned {} points".format(int(np.sum(pcount))))
 
-    pvals = pcount > 5  # mask to filter bins by minimum number of child points
+    pvals = pcount >= minpointcount  # mask to filter bins by minimum number of child points
     avgz[pvals] /= pcount[pvals]
     print("Accepted {} points ({}%)".format(
-        np.sum(pcount[pvals]),
+        int(np.sum(pcount[pvals])),
         int(np.sum(pcount[pvals]) / np.sum(pcount) * 100)))
 
-    print("hist shape", pcount.shape)
-    print("X shape", X.shape)
-
-    print("Interpolating data")
-    gridvals = np.vstack([
+    binnedXY = np.vstack([
         X[:-1, :-1][pvals],  # remove last column and row as they are upper bounds
-        Y[:-1, :-1][pvals]  # and filter by pvals mask
-    ]).T + 0.5 * 1/detail  # offset for bin center
-    Z = interpolate.griddata(
-        gridvals,
-        avgz[pvals].T,
-        np.vstack([X.flatten(), Y.flatten()]).T, method='linear')
+        Y[:-1, :-1][pvals]   # and filter by pvals mask
+    ]) + 0.5 * 1/detail      # offset for bin center
+    print("binnedXY shape", binnedXY.shape)
 
-    print("Z shape", Z.shape)
-
-    avgcloud = pointcloud.PointCloud(np.vstack([X.flatten(), Y.flatten(), Z.flatten()]), X.shape, None, None, None, None)
-    avgcloud.points = pointcloud.align_points_with_xy(avgcloud.points)
-    return avgcloud
+    print("aligning points with XY plane")
+    avgpoints = pointcloud.align_points_with_xy(np.vstack([binnedXY, avgz[pvals].flatten()]))
+    return avgpoints
 
 
 def gen_world_avg_pairs_gc(vid, fnums):
@@ -218,23 +205,20 @@ def gen_world_avg_pairs_gc(vid, fnums):
     fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
 
     vel0 = generate_registrations.load_velocity_fields(vid, *fnumpairs[0])
+
     # generate pair velocity fields
-    # vels = np.array(list(map(lambda fnm: generate_registrations.load_velocity_fields(*fnm), fnumpairs)))
-    print(vel0.shape)
+    # print("initial vel field shape", vel0.shape)
     # crop vels
     vel0 = vel0[:, 50:-50, 50:-50]
-    print(vel0.shape)
+    # print("cropped vel field shape", vel0.shape)
 
     nregs = len(fnumpairs)
     imgshape = vel0[0].shape
-    shapey, shapex = imgshape  # todo: move before cropping
+    shapey, shapex = imgshape  # todo: move before cropping?
 
     velshape = vel0[0].shape
     X, Y = np.meshgrid(np.arange(velshape[1], dtype=np.float32),
                        np.arange(velshape[0], dtype=np.float32))
-
-    # print("cloudshape", clouds[0].imageshape)
-    print("velshape", vel0[0, :, :].shape)
 
     # generate moving average of clouds
     avgperiod = 5
@@ -243,16 +227,18 @@ def gen_world_avg_pairs_gc(vid, fnums):
     clouds = []
     vels = []
 
-    print("Processing frames...")
     i = 0
     for fnumpair in fnumpairs[:avgperiod-1]:
         progress = int(i / nregs * 100)
-        print("\rProgress: {}%".format(progress), end='')
+        print("\rProcessing frames {}%".format(progress), end='')
         i += 1
-        vel = generate_registrations.load_velocity_fields(vid, *fnumpair)[:, 50:-50, 50:-50]
+
+        vel = generate_registrations.load_velocity_fields(
+            vid, *fnumpair
+        )[:, 50:-50, 50:-50]
         vels.append(vel)
         corr = create_pixel_correspondences(vel)
-        # print(vel.shape)
+
         P1, P2, R, t = estimate_projections(corr)
         cloud = generate_cloud(corr, P1, P2, R, t)
         clouds.append(cloud)
@@ -261,16 +247,14 @@ def gen_world_avg_pairs_gc(vid, fnums):
 
     for i in range(nregs - (avgperiod - 1)):
         progress = int((i + avgperiod) / nregs * 100)
-        print("\rProgress: {}%".format(progress), end='')
+        print("\rProcessing frames {}%".format(progress), end='')
 
-        # print("i, lenclouds", i, len(clouds))
         vel = generate_registrations.load_velocity_fields(
-            vid,
-            *fnumpairs[i+avgperiod-1]
+            vid, *fnumpairs[i+avgperiod-1]
         )[:, 50:-50, 50:-50]
         vels.append(vel)
         corr = create_pixel_correspondences(vel)
-        # print(vel.shape)
+
         P1, P2, R, t = estimate_projections(corr)
         cloud = generate_cloud(corr, P1, P2, R, t)
         clouds.append(cloud)
@@ -278,8 +262,6 @@ def gen_world_avg_pairs_gc(vid, fnums):
         assert len(clouds) == avgperiod  # todo: remove check
 
         avg = np.zeros(cloudshape)
-        # avg = np.zeros_like(clouds[i].get_shaped())
-        # print("avg shape", avg.shape)
         for j in range(avgperiod):
             p = clouds[j].get_shaped()
             mapX = (X + vels[j][0, :, :] * shapex).astype('float32')
@@ -290,7 +272,6 @@ def gen_world_avg_pairs_gc(vid, fnums):
         avg /= avgperiod
 
         crop = 50
-        # print("avg shape", avg.shape)
         avgcloudX = avg[400:-crop, crop:-crop, 0]
         avgcloudY = avg[400:-crop, crop:-crop, 1]
         avgcloudZ = avg[400:-crop, crop:-crop, 2]
@@ -317,7 +298,7 @@ def generate_world(vid, start, stop):
     avgpoints = gen_world_avg_pairs_gc(vid, list(range(start, stop, 3)))
 
     # bin, flatten, and render
-    world = gen_binned_cloud(avgpoints)
+    world = gen_binned_points(avgpoints)
     del avgpoints
     # pointcloud.visualise_worlds_mplotlib(world)  #, fname='test_save.png')
     pointcloud.visualise_heatmap(world, fname='./output/{}_{}_singletrain_heatmap'.format(start, stop))
@@ -361,10 +342,10 @@ def generate_world3(vid, start, stop):
         points2 + T * 1/3,
         points3
     ))
-    print("R, T", R, T)
+    # print("R, T", R, T)
 
     # bin, flatten, and render
-    world = gen_binned_cloud(avgpoints)
+    world = gen_binned_points(avgpoints)
     del avgpoints
     # pointcloud.visualise_worlds_mplotlib(world)
     pointcloud.visualise_heatmap(world, fname='./output/{}_{}_tripletrain_multi_heatmap'.format(start, stop))

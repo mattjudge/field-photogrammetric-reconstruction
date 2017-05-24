@@ -112,24 +112,22 @@ def set_axes_equal(ax):
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
 
-def visualise_heatmap(world, fname=None):
-    detail = 5
-    # points = world.points
-    points = world.points[:, ~np.isnan(world.points[-1,:])]
+def visualise_heatmap(points, fname=None, detail=10):
+    # detail = bins per unit
+    pts = points[:, ~np.isnan(points[-1, :])]
 
-    xmin, ymin, zmin = np.floor(np.min(points, axis=1)).astype(int)
-    xmax, ymax, zmax = np.ceil(np.max(points, axis=1)).astype(int)
-    print("data shape", points.shape)
-    print("data min", np.min(points, axis=1))
-    print("data max", np.max(points, axis=1))
+    xmin, ymin, zmin = np.floor(np.min(pts, axis=1)).astype(int)
+    xmax, ymax, zmax = np.ceil(np.max(pts, axis=1)).astype(int)
+    print("data shape", pts.shape)
+    print("data min", np.min(pts, axis=1))
+    print("data max", np.max(pts, axis=1))
 
-    xarr, yarr = np.arange(xmin, xmax + 1, 1 / detail), np.arange(ymin, ymax + 1, 1 / detail)
+    xarr, yarr = np.arange(xmin, xmax, 1 / detail), np.arange(ymin, ymax, 1 / detail)
     X, Y = np.meshgrid(xarr, yarr)
-    yshape, xshape = X.shape
     print("X shape", X.shape)
     print("Y shape", Y.shape)
 
-    Z = interpolate.griddata(np.vstack([points[0, :], points[1, :]]).T, points[2, :].T,
+    Z = interpolate.griddata(np.vstack([pts[0, :], pts[1, :]]).T, pts[2, :].T,
                              np.vstack([X.flatten(), Y.flatten()]).T, method='linear'
                              ).reshape(X.shape)
     print("Z shape", Z.shape)
@@ -149,7 +147,6 @@ def visualise_heatmap(world, fname=None):
         )
     plt.show()
     return plt
-
 
 
 def visualise_worlds_mplotlib(*worlds, method="surf", fname=None):
