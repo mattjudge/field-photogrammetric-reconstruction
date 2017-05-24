@@ -3,7 +3,7 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 import matplotlib.pyplot as plt
-from scipy import interpolate
+from scipy import interpolate, ndimage
 
 
 class PointCloud:
@@ -112,7 +112,7 @@ def set_axes_equal(ax):
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
 
-def visualise_heatmap(points, fname=None, detail=10):
+def visualise_heatmap(points, fname=None, detail=10, gsigma=0):
     # detail = bins per unit
     pts = points[:, ~np.isnan(points[-1, :])]
 
@@ -131,6 +131,10 @@ def visualise_heatmap(points, fname=None, detail=10):
                              np.vstack([X.flatten(), Y.flatten()]).T, method='linear'
                              ).reshape(X.shape)
     print("Z shape", Z.shape)
+
+    if gsigma > 0:
+        Z = ndimage.gaussian_filter(Z, sigma=gsigma, order=0)
+
     fig = plt.figure()
     ax = fig.gca()
     ax.set_aspect('equal')
