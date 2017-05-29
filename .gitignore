@@ -56,3 +56,5 @@ Temporary Items
 .apdisk
 
 *.csv
+
+output/

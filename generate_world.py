@@ -149,9 +149,31 @@ def generate_cloud(correspondences, P1, P2, R, t):
     return pointcloud.PointCloud(points[:-1, :], imshape, P1, P2, R, t)
 
 
-def gen_binned_points(points, detail=5, minpointcount=6):
+def gen_binned_points(points, detail=50, minpointcount=4):
     # detail = bins per unit
     # minpointcount = min number of points in a bin for that bin to be accepted
+
+    # remove outliers
+    def getoutliermask(data, m=3.):
+        # ref: https://stackoverflow.com/a/16562028
+        d = np.abs(data - np.median(data))
+        mdev = np.median(d)
+        s = d / mdev if mdev else 0.
+        return s < m
+
+    # outliermask = getoutliermask(points[0, :])
+    # outliermask = np.logical_and(
+    #     getoutliermask(points[0, :]),
+    #     getoutliermask(points[1, :]),
+    #     getoutliermask(points[2, :])
+    # )
+    # outliermasksum = np.sum(outliermask)
+    # print("outliermask accepts {} out of {} ({}%)".format(
+    #     outliermasksum,
+    #     points[2, :].shape,
+    #     int(outliermasksum / points[2, :].shape * 100)
+    # ))
+    # points = points[:, outliermask]
 
     xmin, ymin, zmin = np.floor(np.min(points, axis=1)).astype(int)
     xmax, ymax, zmax = np.ceil(np.max(points, axis=1)).astype(int)
@@ -182,12 +204,14 @@ def gen_binned_points(points, detail=5, minpointcount=6):
 
     assert np.sum(pcount) == points.shape[1]
     print("Binned {} points".format(int(np.sum(pcount))))
+    print("Mean bin size", np.mean(pcount))
 
     pvals = pcount >= minpointcount  # mask to filter bins by minimum number of child points
     avgz[pvals] /= pcount[pvals]
     print("Accepted {} points ({}%)".format(
         int(np.sum(pcount[pvals])),
         int(np.sum(pcount[pvals]) / np.sum(pcount) * 100)))
+    print("Mean filtered bin size", np.mean(pcount[pvals]))
 
     binnedXY = np.vstack([
         X[:-1, :-1][pvals],  # remove last column and row as they are upper bounds
@@ -217,6 +241,7 @@ def gen_world_avg_pairs_gc(vid, fnums):
     shapey, shapex = imgshape  # todo: move before cropping?
 
     velshape = vel0[0].shape
+    del vel0
     X, Y = np.meshgrid(np.arange(velshape[1], dtype=np.float32),
                        np.arange(velshape[0], dtype=np.float32))
 
@@ -283,11 +308,13 @@ def gen_world_avg_pairs_gc(vid, fnums):
         # shift into global coordinates, trusting R and t from the projection matrices to be correct
         avgpoints = clouds[-1].R.dot(avgpoints) + clouds[-1].t  # shift the previous values into current space
         avgpoints = np.hstack((avgpoints, avgcloudXYZ))  # then add current points
+        # print("avgpoints bytes", avgpoints.nbytes)
 
         # move clouds stack along
-        # clouds = clouds[:-1]
-        clouds = clouds[1:]
-        vels = vels[1:]
+        # clouds = clouds[1:]
+        # vels = vels[1:]
+        del clouds[0]
+        del vels[0]
 
     print("\nProcessed frames")
 
@@ -301,7 +328,7 @@ def generate_world(vid, start, stop):
     world = gen_binned_points(avgpoints)
     del avgpoints
     # pointcloud.visualise_worlds_mplotlib(world)  #, fname='test_save.png')
-    pointcloud.visualise_heatmap(world, fname='./output/{}_{}_singletrain_heatmap'.format(start, stop))
+    pointcloud.visualise_heatmap(world, fname='./output/{}_{}_singletrain_heatmap_neg'.format(start, stop))
 
 
 def multiprocfunc(f):
@@ -315,12 +342,16 @@ def generate_world3(vid, start, stop):
     f3 = list(range(start+2, stop,   3))
     print(f1, f2, f3)
 
-    print("Starting multiprocessing pool")
-    with multiprocessing.Pool() as p:
-        points1, points2, points3 = p.map(
-            multiprocfunc,
-            (f1, f2, f3)
-        )
+    points1 = gen_world_avg_pairs_gc(vid, f1)
+    points2 = gen_world_avg_pairs_gc(vid, f2)
+    points3 = gen_world_avg_pairs_gc(vid, f3)
+
+    # print("Starting multiprocessing pool")
+    # with multiprocessing.Pool() as p:
+    #     points1, points2, points3 = p.map(
+    #         multiprocfunc,
+    #         (f1, f2, f3)
+    #     )
 
     # # transform points to last frame
     # interpolate between final pair
@@ -348,7 +379,7 @@ def generate_world3(vid, start, stop):
     world = gen_binned_points(avgpoints)
     del avgpoints
     # pointcloud.visualise_worlds_mplotlib(world)
-    pointcloud.visualise_heatmap(world, fname='./output/{}_{}_tripletrain_multi_heatmap'.format(start, stop))
+    pointcloud.visualise_heatmap(world, fname='./output/{}_{}_tripletrain_heatmap_neg'.format(start, stop))
 
 
 if __name__ == "__main__":
@@ -360,7 +391,12 @@ if __name__ == "__main__":
     # generate_world3(vid, 9900, 9920)
     # generate_world3(vid, 20750, 20850)
     # generate_world3(vid, 20750, 20800)
-    generate_world3(vid, 9900, 9920)
+    generate_world(vid, 9900, 10200)
+    # generate_world(vid, 10251, 10311)
+    # generate_world3(vid, 26400, 26500)
+    # generate_world3(vid, 31302, 31600)
+    # generate_world(vid, 31590, 31900)
+
     # generate_world3(13100, 13200)
     # generate_world3(vid, 14550, 14610)
     # generate_world3(15000, 15200)

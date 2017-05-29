@@ -112,7 +112,7 @@ def set_axes_equal(ax):
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
 
-def visualise_heatmap(points, fname=None, detail=10, gsigma=0):
+def visualise_heatmap(points, fname=None, detail=30, gsigma=0):
     # detail = bins per unit
     pts = points[:, ~np.isnan(points[-1, :])]
 
@@ -126,8 +126,9 @@ def visualise_heatmap(points, fname=None, detail=10, gsigma=0):
     X, Y = np.meshgrid(xarr, yarr)
     print("X shape", X.shape)
     print("Y shape", Y.shape)
+    print("interpolating Z")
 
-    Z = interpolate.griddata(np.vstack([pts[0, :], pts[1, :]]).T, pts[2, :].T,
+    Z = -interpolate.griddata(np.vstack([pts[0, :], pts[1, :]]).T, pts[2, :].T,
                              np.vstack([X.flatten(), Y.flatten()]).T, method='linear'
                              ).reshape(X.shape)
     print("Z shape", Z.shape)
@@ -135,6 +136,7 @@ def visualise_heatmap(points, fname=None, detail=10, gsigma=0):
     if gsigma > 0:
         Z = ndimage.gaussian_filter(Z, sigma=gsigma, order=0)
 
+    print("final Z shape", Z.shape)
     fig = plt.figure()
     ax = fig.gca()
     ax.set_aspect('equal')
@@ -143,12 +145,12 @@ def visualise_heatmap(points, fname=None, detail=10, gsigma=0):
     plt.imshow(Z, cmap='gray')
     plt.colorbar()
     if fname is not None:
-        plt.savefig('{}.png'.format(fname))
-        np.savetxt(
-            '{}.csv'.format(fname),
-            np.vstack([X.flatten(), Y.flatten(), Z.flatten()]).T,
-            delimiter=','
-        )
+        plt.savefig('{}.eps'.format(fname), dpi=1000)
+        # np.savetxt(
+        #     '{}.csv'.format(fname),
+        #     np.vstack([X.flatten(), Y.flatten(), Z.flatten()]).T,
+        #     delimiter=','
+        # )
     plt.show()
     return plt
 
