@@ -3,7 +3,9 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as grd
 from scipy import interpolate, ndimage
+from scipy.io import savemat
 
 
 class PointCloud:
@@ -112,7 +114,7 @@ def set_axes_equal(ax):
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
 
-def visualise_heatmap(points, fname=None, detail=30, gsigma=0):
+def visualise_heatmap(points, fname=None, detail=30, gsigma=0, mode='plain'):
     # detail = bins per unit
     pts = points[:, ~np.isnan(points[-1, :])]
 
@@ -136,23 +138,93 @@ def visualise_heatmap(points, fname=None, detail=30, gsigma=0):
     if gsigma > 0:
         Z = ndimage.gaussian_filter(Z, sigma=gsigma, order=0)
 
+    finshape = Z.shape
     print("final Z shape", Z.shape)
-    fig = plt.figure()
-    ax = fig.gca()
-    ax.set_aspect('equal')
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    plt.imshow(Z, cmap='gray')
-    plt.colorbar()
+
+    # print("X", X)
+
+    # scale XYZ
+    scale = 3.3
+    X /= scale
+    Y /= scale
+    Z /= scale
+
+    # print("X", X)
+
+    if mode == 'cutthru':
+        # create a 2 X 2 grid
+        # gs = grd.GridSpec(3, 2, height_ratios=[6, 1, 1], width_ratios=[10, 1], wspace=0.2)
+        fig, axes = plt.subplots(3, 2, sharex='col', subplot_kw=dict(),
+                                 gridspec_kw=dict(height_ratios=[4, 1, 1], width_ratios=[10, 1], wspace=0.2))
+
+        # image plot
+        ax = axes[0, 0]
+        p = ax.imshow(Z, cmap='gray',
+                      extent=(np.min(X), np.max(X), np.min(Y), np.max(Y)),
+                      interpolation='nearest', aspect='equal')  # set the aspect ratio to auto to fill the space.
+        # ax.set_xlabel('x [m]')
+        ax.set_ylabel('y [m]')
+
+        rowA = 500  # finshape[0] - 300
+        rowB = 200
+        ax.plot((np.min(X), np.max(X)), (Y[rowA, 0], Y[rowA, -1]), 'b-')
+        ax.plot((np.min(X), np.max(X)), (Y[rowB, 0], Y[rowB, -1]), 'r-')
+
+        # color bar in it's own axis
+        colorAx = axes[0, 1]
+        cb = plt.colorbar(p, cax=colorAx)
+        cb.set_label('Crop height deviation (z) [m]')
+
+        # line plot
+        ax2 = axes[1, 0]
+        ax2.spines['right'].set_visible(False)
+        ax2.spines['top'].set_visible(False)
+        ax2.xaxis.set_ticks_position('bottom')
+        ax2.yaxis.set_ticks_position('left')
+
+        # ax2.set_aspect('auto')
+        # ax2.set_xlabel('x [m]')
+        ax2.set_ylabel('z [m]')
+        ax2.set_xlim((np.min(X), np.max(X)))
+        ax2.plot(X[-rowA, :], Z[-rowA, :], "b-")
+
+        # line plot
+        ax3 = axes[2, 0]
+        ax3.spines['right'].set_visible(False)
+        ax3.spines['top'].set_visible(False)
+        ax3.xaxis.set_ticks_position('bottom')
+        ax3.yaxis.set_ticks_position('left')
+
+        ax3.set_xlabel('x [m]')
+        ax3.set_ylabel('z [m]')
+        ax3.set_xlim((np.min(X), np.max(X)))
+        ax3.plot(X[-rowB, :], Z[-rowB, :], "r-")
+
+        # hide unwanted
+        axes[1, 1].axis('off')
+        axes[2, 1].axis('off')
+
+    else:
+        fig = plt.figure()
+        ax = fig.gca()
+        plt.imshow(Z, cmap='gray',
+                      extent=(np.min(X), np.max(X), np.min(Y), np.max(Y)),
+                      interpolation='nearest', aspect='equal')  # set the aspect ratio to auto to fill the space.
+        ax.set_xlabel('x [m]')
+        ax.set_ylabel('y [m]')
+        plt.colorbar()
+
     if fname is not None:
-        plt.savefig('{}.eps'.format(fname), dpi=1000)
-        # np.savetxt(
-        #     '{}.csv'.format(fname),
-        #     np.vstack([X.flatten(), Y.flatten(), Z.flatten()]).T,
-        #     delimiter=','
-        # )
+        fname = '{}_gsigma{}_mode{}'.format(fname, gsigma, mode)
+        fig.savefig('{}.pdf'.format(fname), dpi=1000)
+        savemat('{}.mat'.format(fname), {
+            'X': X,
+            'Y': Y,
+            'Z': Z
+        })
+
     plt.show()
-    return plt
+    return fig
 
 
 def visualise_worlds_mplotlib(*worlds, method="surf", fname=None):

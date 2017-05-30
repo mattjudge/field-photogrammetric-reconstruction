@@ -1,7 +1,6 @@
 
 import numpy as np
 import cv2
-from scipy import interpolate
 import multiprocessing
 
 import generate_registrations
@@ -321,14 +320,25 @@ def gen_world_avg_pairs_gc(vid, fnums):
     return avgpoints
 
 
-def generate_world(vid, start, stop):
-    avgpoints = gen_world_avg_pairs_gc(vid, list(range(start, stop, 3)))
-
+def bin_and_render(avgpoints, fname=None):
     # bin, flatten, and render
     world = gen_binned_points(avgpoints)
     del avgpoints
-    # pointcloud.visualise_worlds_mplotlib(world)  #, fname='test_save.png')
-    pointcloud.visualise_heatmap(world, fname='./output/{}_{}_singletrain_heatmap_neg'.format(start, stop))
+
+    # if fname is not None:
+    #     print("exporting .mat file")
+    #     savemat('{}.mat'.format(fname), {
+    #         'X': X.flatten(),
+    #         'Y': Y.flatten(),
+    #         'Z': Z.flatten()
+    #     })
+
+    pointcloud.visualise_heatmap(world, fname=fname)
+
+
+def generate_world(vid, start, stop):
+    avgpoints = gen_world_avg_pairs_gc(vid, list(range(start, stop, 3)))
+    bin_and_render(avgpoints, './output/{}_{}_singletrain_heatmap_neg'.format(start, stop))
 
 
 def multiprocfunc(f):
@@ -336,22 +346,23 @@ def multiprocfunc(f):
     return gen_world_avg_pairs_gc(vidl, f)
 
 
-def generate_world3(vid, start, stop):
+def generate_world3(vid, start, stop, multiproc=True):
     f1 = list(range(start,   stop-2, 3))
     f2 = list(range(start+1, stop-1, 3))
     f3 = list(range(start+2, stop,   3))
     print(f1, f2, f3)
 
-    points1 = gen_world_avg_pairs_gc(vid, f1)
-    points2 = gen_world_avg_pairs_gc(vid, f2)
-    points3 = gen_world_avg_pairs_gc(vid, f3)
-
-    # print("Starting multiprocessing pool")
-    # with multiprocessing.Pool() as p:
-    #     points1, points2, points3 = p.map(
-    #         multiprocfunc,
-    #         (f1, f2, f3)
-    #     )
+    if multiproc:
+        print("Starting multiprocessing pool")
+        with multiprocessing.Pool() as p:
+            points1, points2, points3 = p.map(
+                multiprocfunc,
+                (f1, f2, f3)
+            )
+    else:
+        points1 = gen_world_avg_pairs_gc(vid, f1)
+        points2 = gen_world_avg_pairs_gc(vid, f2)
+        points3 = gen_world_avg_pairs_gc(vid, f3)
 
     # # transform points to last frame
     # interpolate between final pair
@@ -375,11 +386,7 @@ def generate_world3(vid, start, stop):
     ))
     # print("R, T", R, T)
 
-    # bin, flatten, and render
-    world = gen_binned_points(avgpoints)
-    del avgpoints
-    # pointcloud.visualise_worlds_mplotlib(world)
-    pointcloud.visualise_heatmap(world, fname='./output/{}_{}_tripletrain_heatmap_neg'.format(start, stop))
+    bin_and_render(avgpoints, './output/{}_{}_tripletrain_heatmap_neg'.format(start, stop))
 
 
 if __name__ == "__main__":
@@ -388,10 +395,12 @@ if __name__ == "__main__":
     print(vid.shape)
     print(vid.fps)
 
-    # generate_world3(vid, 9900, 9920)
+    generate_world3(vid, 9900, 9920)
     # generate_world3(vid, 20750, 20850)
     # generate_world3(vid, 20750, 20800)
-    generate_world(vid, 9900, 10200)
+    # generate_world(vid, 9900, 10200)
+    # generate_world3(vid, 9900, 9930)
+    # generate_world3(vid, 26400, 26460)
     # generate_world(vid, 10251, 10311)
     # generate_world3(vid, 26400, 26500)
     # generate_world3(vid, 31302, 31600)
