@@ -346,7 +346,7 @@ def multiprocfunc(f):
     return gen_world_avg_pairs_gc(vidl, f)
 
 
-def generate_world3(vid, start, stop, multiproc=True):
+def generate_world3(vid, start, stop, multiproc=False):
     f1 = list(range(start,   stop-2, 3))
     f2 = list(range(start+1, stop-1, 3))
     f3 = list(range(start+2, stop,   3))
@@ -389,21 +389,37 @@ def generate_world3(vid, start, stop, multiproc=True):
     bin_and_render(avgpoints, './output/{}_{}_tripletrain_heatmap_neg'.format(start, stop))
 
 
+def gen_frame_pair(vid, f0, f1):
+    vel = generate_registrations.load_velocity_fields(
+        vid, f0, f1
+    )[:, 50:-50, 50:-50]
+
+    corr = create_pixel_correspondences(vel)
+    P1, P2, R, t = estimate_projections(corr)
+    cloud = generate_cloud(corr, P1, P2, R, t)
+    cloud.points = pointcloud.align_points_with_xy(cloud.points)
+
+    pointcloud.visualise_worlds_mplotlib(cloud)
+    # pointcloud.visualise_heatmap(cloud.points, fname="./output/{}_{}_single_pair".format(f0, f1))
+
+
 if __name__ == "__main__":
     vid = video.Video(r"../../../../../YUNC0001.mp4")
     print(vid.fname)
     print(vid.shape)
     print(vid.fps)
 
-    generate_world3(vid, 9900, 9920)
+    gen_frame_pair(vid, 9900, 9903)
+
+    # generate_world(vid, 9900, 9920)
     # generate_world3(vid, 20750, 20850)
     # generate_world3(vid, 20750, 20800)
-    # generate_world(vid, 9900, 10200)
+    # generate_world3(vid, 9900, 10100)
     # generate_world3(vid, 9900, 9930)
     # generate_world3(vid, 26400, 26460)
     # generate_world(vid, 10251, 10311)
     # generate_world3(vid, 26400, 26500)
-    # generate_world3(vid, 31302, 31600)
+    # generate_world(vid, 31302, 31600)
     # generate_world(vid, 31590, 31900)
 
     # generate_world3(13100, 13200)
