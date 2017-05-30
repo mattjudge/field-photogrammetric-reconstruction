@@ -3,7 +3,6 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as grd
 from scipy import interpolate, ndimage
 from scipy.io import savemat
 
@@ -160,13 +159,13 @@ def visualise_heatmap(points, fname=None, detail=30, gsigma=0, mode='plain'):
         # image plot
         ax = axes[0, 0]
         p = ax.imshow(Z, cmap='gray',
-                      extent=(np.min(X), np.max(X), np.min(Y), np.max(Y)),
-                      interpolation='nearest', aspect='equal')  # set the aspect ratio to auto to fill the space.
+                      extent=(np.min(X), np.max(X), np.max(Y), np.min(Y)),
+                      interpolation='nearest', aspect='equal', origin='upper')  # set the aspect ratio to auto to fill the space.
         # ax.set_xlabel('x [m]')
         ax.set_ylabel('y [m]')
 
-        rowA = 500  # finshape[0] - 300
-        rowB = 200
+        rowA = -500
+        rowB = -200
         ax.plot((np.min(X), np.max(X)), (Y[rowA, 0], Y[rowA, -1]), 'b-')
         ax.plot((np.min(X), np.max(X)), (Y[rowB, 0], Y[rowB, -1]), 'r-')
 
@@ -186,7 +185,7 @@ def visualise_heatmap(points, fname=None, detail=30, gsigma=0, mode='plain'):
         # ax2.set_xlabel('x [m]')
         ax2.set_ylabel('z [m]')
         ax2.set_xlim((np.min(X), np.max(X)))
-        ax2.plot(X[-rowA, :], Z[-rowA, :], "b-")
+        ax2.plot(X[rowA, :], Z[rowA, :], "b-")
 
         # line plot
         ax3 = axes[2, 0]
@@ -198,7 +197,7 @@ def visualise_heatmap(points, fname=None, detail=30, gsigma=0, mode='plain'):
         ax3.set_xlabel('x [m]')
         ax3.set_ylabel('z [m]')
         ax3.set_xlim((np.min(X), np.max(X)))
-        ax3.plot(X[-rowB, :], Z[-rowB, :], "r-")
+        ax3.plot(X[rowB, :], Z[rowB, :], "r-")
 
         # hide unwanted
         axes[1, 1].axis('off')
@@ -207,16 +206,17 @@ def visualise_heatmap(points, fname=None, detail=30, gsigma=0, mode='plain'):
     else:
         fig = plt.figure()
         ax = fig.gca()
-        plt.imshow(Z, cmap='gray',
-                      extent=(np.min(X), np.max(X), np.min(Y), np.max(Y)),
-                      interpolation='nearest', aspect='equal')  # set the aspect ratio to auto to fill the space.
+        p = plt.imshow(Z, cmap='gray',  # cmap='hot',
+                   extent=(np.min(X), np.max(X), np.max(Y), np.min(Y)),
+                   interpolation='nearest', aspect='equal', origin='upper')  # set the aspect ratio to auto to fill the space.
         ax.set_xlabel('x [m]')
         ax.set_ylabel('y [m]')
-        plt.colorbar()
+        cb = fig.colorbar(p)
+        cb.set_label('Crop height deviation (z) [m]')
 
     if fname is not None:
-        fname = '{}_gsigma{}_mode{}'.format(fname, gsigma, mode)
-        fig.savefig('{}.pdf'.format(fname), dpi=1000)
+        fname = '{}_gsigma{}'.format(fname, gsigma)
+        fig.savefig('{}_mode{}.pdf'.format(fname, mode), dpi=1000)
         savemat('{}.mat'.format(fname), {
             'X': X,
             'Y': Y,
