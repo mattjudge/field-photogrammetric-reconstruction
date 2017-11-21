@@ -9,8 +9,6 @@ import pickle
 from dtcwt.numpy import Transform2d
 import dtcwt.registration as reg
 
-# logging.basicConfig(level=logging.INFO)
-
 
 def take_transform(frame):
     trans = Transform2d()
@@ -28,7 +26,7 @@ def load_frame(vid, fnum):
 
 
 def load_transform_frame(vid, fnum, cache=False):
-    logging.info('Taking transform')
+    logging.debug('Taking transform of frame {}'.format(fnum))
     path = './data/transform_{}.pickle'.format(fnum)
     try:
         # tform = np.load(path)
@@ -45,7 +43,7 @@ def load_transform_frame(vid, fnum, cache=False):
 
 
 def load_flow(vid, fnum1, fnum2, cache=True):
-    logging.info('Finding flow')
+    logging.debug('Finding flow of frames {} & {}'.format(fnum1, fnum2))
     path = './data/flow_{}_{}.npy'.format(fnum1, fnum2)
     try:
         flow = np.load(path)
@@ -58,7 +56,7 @@ def load_flow(vid, fnum1, fnum2, cache=True):
 
 def load_velocity_fields(vid, fnum1, fnum2, cache=False):
     # cache is off by default, because of large file sizes, and low computation expense
-    logging.info('Computing velocities')
+    logging.debug('Computing velocities of frames {} & {}'.format(fnum1, fnum2))
     path = './data/velocities_{}_{}.npy'.format(fnum1, fnum2)
     try:
         vels = np.load(path)
@@ -71,4 +69,3 @@ def load_velocity_fields(vid, fnum1, fnum2, cache=False):
 
 if __name__ == '__main__':
     pass
-    # load_velocity_fields(9900, 9903)

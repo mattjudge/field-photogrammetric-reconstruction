@@ -1,5 +1,5 @@
-load('./output/9900_9920_tripletrain_heatmap_neg_gsigma0_modeplain.mat')
-downsample = 4;
+load('./output/31302_31600_singletrain_heatmap_neg_gsigma0.mat')
+downsample = 5;
 X = X(1:downsample:end,1:downsample:end);
 Y = Y(1:downsample:end,1:downsample:end);
 Z = Z(1:downsample:end,1:downsample:end);
@@ -12,3 +12,5 @@ zlabel('z [m]')
 axis equal
 set(gca,'Xdir','reverse')
 colormap hot
+
+title('Point cloud generated from SFT 31302-31600')

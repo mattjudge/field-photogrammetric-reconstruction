@@ -1,3 +1,4 @@
+import logging
 import cv2
 
 
@@ -30,7 +31,7 @@ class Video:
         frame = self.get_frame_number(fnum)
         path = "./data/frame{}.png".format(fnum, frame)
         cv2.imwrite(path, frame)
-        print("written", path)
+        logging.info("written", path)
         return frame
 
     def get_frame_number_at_seconds(self, t):
@@ -41,9 +42,9 @@ class Video:
 
 
 if __name__ == "__main__":
-    vid = Video(r"../../../../../YUNC0001.mp4")
-    print(vid.fname)
-    print(vid.shape)
-    print(vid.fps)
+    pass
+    # vid = Video(r"../../../../../YUNC0001.mp4")
+    # print(vid.fname)
+    # print(vid.shape)
+    # print(vid.fps)
     # vid.save_frame_number(9909)
-    # save_frame_at_seconds(60*7+32)

@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 
 from mpl_toolkits.mplot3d import Axes3D
@@ -61,7 +63,7 @@ def align_points_with_xy(points):
     # Z = np.dot(np.c_[XX, YY, np.ones(XX.shape)], C).reshape(X.shape)
 
     centroid = np.mean(notnan_points, axis=1, keepdims=True)
-    print("centroid", centroid)
+    logging.info("Centroid: {}".format(centroid))
     points -= centroid
 
     cos_t = 1 / np.sqrt(C[0] ** 2 + C[1] ** 2 + 1)
@@ -113,42 +115,40 @@ def set_axes_equal(ax):
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
 
-def visualise_heatmap(points, fname=None, detail=30, gsigma=0, mode='plain'):
+def visualise_heatmap(points, fname=None, detail=30, gsigma=0, mode='cutthru'):
     # detail = bins per unit
     pts = points[:, ~np.isnan(points[-1, :])]
 
     xmin, ymin, zmin = np.floor(np.min(pts, axis=1)).astype(int)
     xmax, ymax, zmax = np.ceil(np.max(pts, axis=1)).astype(int)
-    print("data shape", pts.shape)
-    print("data min", np.min(pts, axis=1))
-    print("data max", np.max(pts, axis=1))
+    logging.info("data shape: {}".format(pts.shape))
+    logging.info("data min  : {}".format(np.min(pts, axis=1)))
+    logging.info("data max  : {}".format(np.max(pts, axis=1)))
 
     xarr, yarr = np.arange(xmin, xmax, 1 / detail), np.arange(ymin, ymax, 1 / detail)
     X, Y = np.meshgrid(xarr, yarr)
-    print("X shape", X.shape)
-    print("Y shape", Y.shape)
-    print("interpolating Z")
+    logging.info("X shape: {}".format(X.shape))
+    logging.info("Y shape: {}".format(Y.shape))
+    print("Interpolating Z")
 
     Z = -interpolate.griddata(np.vstack([pts[0, :], pts[1, :]]).T, pts[2, :].T,
-                             np.vstack([X.flatten(), Y.flatten()]).T, method='linear'
-                             ).reshape(X.shape)
-    print("Z shape", Z.shape)
+                              np.vstack([X.flatten(), Y.flatten()]).T, method='linear'
+                              ).reshape(X.shape)
+    logging.info("Z shape: {}".format(Z.shape))
 
     if gsigma > 0:
         Z = ndimage.gaussian_filter(Z, sigma=gsigma, order=0)
 
     finshape = Z.shape
-    print("final Z shape", Z.shape)
+    logging.info("Final Z shape: {}".format(Z.shape))
 
-    # print("X", X)
+    print("Rendering")
 
     # scale XYZ
     scale = 3.3
     X /= scale
     Y /= scale
     Z /= scale
-
-    # print("X", X)
 
     if mode == 'cutthru':
         # create a 2 X 2 grid
@@ -239,7 +239,8 @@ def visualise_worlds_mplotlib(*worlds, method="surf", fname=None):
         if len(worlds) == 1:
             shaped = worlds[0].get_shaped()
             X, Y, Z = shaped[:, :, 0], shaped[:, :, 1], shaped[:, :, 2]
-            print("Z range", np.nanmin(Z), np.nanmax(Z))
+
+            logging.info("Z range: {}, {}".format(np.nanmin(Z), np.nanmax(Z)))
             surf = ax.plot_surface(X, Y, Z, cmap=cm.hot, linewidth=0, antialiased=False,
                                    vmin=np.nanmin(Z), vmax=np.nanmax(Z))  # these limits seem to make it less
                                                                         # sharp, but are required to deal with NaNs

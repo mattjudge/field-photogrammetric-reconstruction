@@ -1,4 +1,6 @@
 
+import logging
+
 import numpy as np
 import cv2
 import multiprocessing
@@ -18,7 +20,6 @@ def get_fundamental(u1, v1, u2, v2):
     # print(np.min(s), s.flatten()[-1])  # verify last column of V is nullspace
     # NS = VT[:, -1:].transpose()
     NS = VT[-1:, :].transpose()
-    print(NS.shape)
     return NS.reshape((3, 3)) / NS[-1]
 
 
@@ -176,14 +177,14 @@ def gen_binned_points(points, detail=50, minpointcount=4):
 
     xmin, ymin, zmin = np.floor(np.min(points, axis=1)).astype(int)
     xmax, ymax, zmax = np.ceil(np.max(points, axis=1)).astype(int)
-    print("data shape", points.shape)
-    print("data min", np.min(points, axis=1))
-    print("data max", np.max(points, axis=1))
+    logging.info("Data shape: {}".format(points.shape))
+    logging.info("Data min:   {}".format(np.min(points, axis=1)))
+    logging.info("Data max:   {}".format(np.max(points, axis=1)))
 
     xarr, yarr = np.arange(xmin, xmax+1, 1/detail), \
                  np.arange(ymin, ymax+1, 1/detail)
     X, Y = np.meshgrid(xarr, yarr)
-    print("X,Y shape", X.shape, Y.shape)
+    logging.info("X,Y shape: {}, {}".format(X.shape, Y.shape))
 
     avgz, xedges, yedges = np.histogram2d(
         points[0, :], points[1, :],
@@ -199,11 +200,11 @@ def gen_binned_points(points, detail=50, minpointcount=4):
     )
     avgz = avgz.T  # np.histogram2d returns with x on first dim (unconventional)
     pcount = pcount.T
-    print("binned shape", avgz.shape)
+    logging.info("Binned shape: {}".format(avgz.shape))
 
     assert np.sum(pcount) == points.shape[1]
     print("Binned {} points".format(int(np.sum(pcount))))
-    print("Mean bin size", np.mean(pcount))
+    print("Mean bin size: ", np.mean(pcount))
 
     pvals = pcount >= minpointcount  # mask to filter bins by minimum number of child points
     avgz[pvals] /= pcount[pvals]
@@ -216,9 +217,9 @@ def gen_binned_points(points, detail=50, minpointcount=4):
         X[:-1, :-1][pvals],  # remove last column and row as they are upper bounds
         Y[:-1, :-1][pvals]   # and filter by pvals mask
     ]) + 0.5 * 1/detail      # offset for bin center
-    print("binnedXY shape", binnedXY.shape)
+    logging.info("binnedXY shape: {}".format(binnedXY.shape))
 
-    print("aligning points with XY plane")
+    print("Aligning points with XY plane")
     avgpoints = pointcloud.align_points_with_xy(np.vstack([binnedXY, avgz[pvals].flatten()]))
     return avgpoints
 
@@ -254,7 +255,7 @@ def gen_world_avg_pairs_gc(vid, fnums):
     i = 0
     for fnumpair in fnumpairs[:avgperiod-1]:
         progress = int(i / nregs * 100)
-        print("\rProcessing frames {}%".format(progress), end='')
+        print("\rProcessing frames\t{}%".format(progress), end='')
         i += 1
 
         vel = generate_registrations.load_velocity_fields(
@@ -271,7 +272,7 @@ def gen_world_avg_pairs_gc(vid, fnums):
 
     for i in range(nregs - (avgperiod - 1)):
         progress = int((i + avgperiod) / nregs * 100)
-        print("\rProcessing frames {}%".format(progress), end='')
+        print("\rProcessing frames\t{}%".format(progress), end='')
 
         vel = generate_registrations.load_velocity_fields(
             vid, *fnumpairs[i+avgperiod-1]
@@ -322,6 +323,7 @@ def gen_world_avg_pairs_gc(vid, fnums):
 
 def bin_and_render(avgpoints, fname=None):
     # bin, flatten, and render
+    print("Binning points")
     world = gen_binned_points(avgpoints)
     del avgpoints
 
@@ -346,11 +348,11 @@ def multiprocfunc(f):
     return gen_world_avg_pairs_gc(vidl, f)
 
 
-def generate_world3(vid, start, stop, multiproc=False):
+def generate_world3(vid, start, stop, multiproc=True):
     f1 = list(range(start,   stop-2, 3))
     f2 = list(range(start+1, stop-1, 3))
     f3 = list(range(start+2, stop,   3))
-    print(f1, f2, f3)
+    logging.debug("Frame lists: \n{}\n{}\n{}".format(f1, f2, f3))
 
     if multiproc:
         print("Starting multiprocessing pool")
@@ -367,7 +369,7 @@ def generate_world3(vid, start, stop, multiproc=False):
     # # transform points to last frame
     # interpolate between final pair
     finalpair = f3[-2:]
-    print(finalpair)
+    logging.debug("finalpair {}".format(finalpair))
 
     vel = generate_registrations.load_velocity_fields(vid, *finalpair)[:, 50:-50, 50:-50]
     vel1 = vel * 2/3
@@ -405,19 +407,18 @@ def gen_frame_pair(vid, f0, f1):
 
 if __name__ == "__main__":
     vid = video.Video(r"../../../../../YUNC0001.mp4")
-    print(vid.fname)
-    print(vid.shape)
-    print(vid.fps)
+    print("Loaded video {fname}, shape: {shape}, fps: {fps}".format(fname=vid.fname, shape=vid.shape, fps=vid.fps))
 
-    gen_frame_pair(vid, 9900, 9903)
+    # gen_frame_pair(vid, 9900, 9903)
 
     # generate_world(vid, 9900, 9920)
     # generate_world3(vid, 20750, 20850)
     # generate_world3(vid, 20750, 20800)
     # generate_world3(vid, 9900, 10100)
     # generate_world3(vid, 9900, 9930)
-    # generate_world3(vid, 26400, 26460)
-    # generate_world(vid, 10251, 10311)
+    generate_world3(vid, 26400, 26460)
+    # generate_world(vid, 26400, 26460)
+    # generate_world3(vid, 10101, 10160)
     # generate_world3(vid, 26400, 26500)
     # generate_world(vid, 31302, 31600)
     # generate_world(vid, 31590, 31900)
@@ -425,3 +426,5 @@ if __name__ == "__main__":
     # generate_world3(13100, 13200)
     # generate_world3(vid, 14550, 14610)
     # generate_world3(15000, 15200)
+
+    print("Done.")
