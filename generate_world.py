@@ -150,6 +150,7 @@ def generate_cloud(correspondences, P1, P2, R, t):
 
 
 def gen_binned_points(points, detail=50, minpointcount=4):
+    logging.info("binning points shape: {}".format(points.shape))
     # detail = bins per unit
     # minpointcount = min number of points in a bin for that bin to be accepted
 
@@ -258,9 +259,7 @@ def gen_world_avg_pairs_gc(vid, fnums):
         print("\rProcessing frames\t{}%".format(progress), end='')
         i += 1
 
-        vel = generate_registrations.load_velocity_fields(
-            vid, *fnumpair
-        )[:, 50:-50, 50:-50]
+        vel = generate_registrations.load_velocity_fields(vid, *fnumpair)[:, 50:-50, 50:-50]
         vels.append(vel)
         corr = create_pixel_correspondences(vel)
 
@@ -338,20 +337,20 @@ def bin_and_render(avgpoints, fname=None):
     pointcloud.visualise_heatmap(world, fname=fname)
 
 
-def generate_world(vid, start, stop):
-    avgpoints = gen_world_avg_pairs_gc(vid, list(range(start, stop, 3)))
-    bin_and_render(avgpoints, './output/{}_{}_singletrain_heatmap_neg'.format(start, stop))
+def generate_world(clip):
+    avgpoints = gen_world_avg_pairs_gc(clip.video, list(range(clip.start_frame, clip.stop_frame, 3)))
+    bin_and_render(avgpoints, './output/{}_{}_singletrain_heatmap_neg'.format(clip.start_frame, clip.stop_frame))
 
 
 def multiprocfunc(f):
-    vidl = video.Video(vid.fname)  # todo: don't rely on vid from global
+    vidl = video.Video(vid.path)  # todo: don't rely on vid from global
     return gen_world_avg_pairs_gc(vidl, f)
 
 
-def generate_world3(vid, start, stop, multiproc=True):
-    f1 = list(range(start,   stop-2, 3))
-    f2 = list(range(start+1, stop-1, 3))
-    f3 = list(range(start+2, stop,   3))
+def generate_world3(clip, multiproc=True):
+    f1 = list(range(clip.start_frame+0, clip.stop_frame-2, 3))
+    f2 = list(range(clip.start_frame+1, clip.stop_frame-1, 3))
+    f3 = list(range(clip.start_frame+2, clip.stop_frame-0, 3))
     logging.debug("Frame lists: \n{}\n{}\n{}".format(f1, f2, f3))
 
     if multiproc:
@@ -362,16 +361,16 @@ def generate_world3(vid, start, stop, multiproc=True):
                 (f1, f2, f3)
             )
     else:
-        points1 = gen_world_avg_pairs_gc(vid, f1)
-        points2 = gen_world_avg_pairs_gc(vid, f2)
-        points3 = gen_world_avg_pairs_gc(vid, f3)
+        points1 = gen_world_avg_pairs_gc(clip.video, f1)
+        points2 = gen_world_avg_pairs_gc(clip.video, f2)
+        points3 = gen_world_avg_pairs_gc(clip.video, f3)
 
     # # transform points to last frame
     # interpolate between final pair
     finalpair = f3[-2:]
     logging.debug("finalpair {}".format(finalpair))
 
-    vel = generate_registrations.load_velocity_fields(vid, *finalpair)[:, 50:-50, 50:-50]
+    vel = generate_registrations.load_velocity_fields(clip.video, *finalpair)[:, 50:-50, 50:-50]
     vel1 = vel * 2/3
     vel2 = vel * 1/3
 
@@ -388,13 +387,11 @@ def generate_world3(vid, start, stop, multiproc=True):
     ))
     # print("R, T", R, T)
 
-    bin_and_render(avgpoints, './output/{}_{}_tripletrain_heatmap_neg'.format(start, stop))
+    bin_and_render(avgpoints, './output/{}_{}_tripletrain_heatmap_neg'.format(clip.start_frame, clip.stop_frame))
 
 
 def gen_frame_pair(vid, f0, f1):
-    vel = generate_registrations.load_velocity_fields(
-        vid, f0, f1
-    )[:, 50:-50, 50:-50]
+    vel = generate_registrations.load_velocity_fields(vid, f0, f1)[:, 50:-50, 50:-50]
 
     corr = create_pixel_correspondences(vel)
     P1, P2, R, t = estimate_projections(corr)
@@ -406,25 +403,27 @@ def gen_frame_pair(vid, f0, f1):
 
 
 if __name__ == "__main__":
+    # logging.root.setLevel(logging.DEBUG)
     vid = video.Video(r"../../../../../YUNC0001.mp4")
-    print("Loaded video {fname}, shape: {shape}, fps: {fps}".format(fname=vid.fname, shape=vid.shape, fps=vid.fps))
+    clip = video.Clip(vid, 26400, 26460)
+    # 9900, 9920
+    # 20750, 20850
+    # 20750, 20800
+    # 9900, 10100
+    # 9900, 9930
+    # 26400, 26460
+    # 10101, 10160
+    # 26400, 26500
+    # 31302, 31600
+    # 31590, 31900
+    # 13100, 13200
+    # 14550, 14610
+    # 15000, 15200
 
-    # gen_frame_pair(vid, 9900, 9903)
+    print("Loaded video {fname}, shape: {shape}, fps: {fps}, start: {start}, stop: {stop}".format(
+        fname=clip.video.path, shape=clip.video.shape, fps=clip.video.fps,
+        start=clip.start_frame, stop=clip.stop_frame))
 
-    # generate_world(vid, 9900, 9920)
-    # generate_world3(vid, 20750, 20850)
-    # generate_world3(vid, 20750, 20800)
-    # generate_world3(vid, 9900, 10100)
-    # generate_world3(vid, 9900, 9930)
-    generate_world3(vid, 26400, 26460)
-    # generate_world(vid, 26400, 26460)
-    # generate_world3(vid, 10101, 10160)
-    # generate_world3(vid, 26400, 26500)
-    # generate_world(vid, 31302, 31600)
-    # generate_world(vid, 31590, 31900)
-
-    # generate_world3(13100, 13200)
-    # generate_world3(vid, 14550, 14610)
-    # generate_world3(15000, 15200)
+    generate_world3(clip)
 
     print("Done.")
