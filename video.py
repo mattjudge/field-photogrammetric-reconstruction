@@ -20,6 +20,9 @@ class Video:
     def __str__(self):
         return self.name
 
+    def __repr__(self):
+        return self.path
+
     def get_frame_number(self, fnum):
         self.vidcap.set(cv2.CAP_PROP_POS_FRAMES, fnum)
         success, frame = self.vidcap.read()

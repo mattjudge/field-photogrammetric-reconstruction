@@ -23,7 +23,7 @@ def load_flow(vid, fnum1, fnum2):
     return reg.estimatereg(take_transform(vid, fnum1), take_transform(vid, fnum2))
 
 
-@cache_numpy_result(True)
+@cache_numpy_result(True, hash_method='readable')
 def load_velocity_fields(vid, fnum1, fnum2):
     logging.debug('Computing velocities of frames {} & {}'.format(fnum1, fnum2))
     return np.array(reg.velocityfield(load_flow(vid, fnum1, fnum2), vid.shape, method='nearest'))
