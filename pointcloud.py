@@ -20,6 +20,10 @@ class PointCloud:
         :param R: The rotation mapping the first camera to the second, followed by translation t
         :param t: The translation mapping the first camera to the second after rotation R
         """
+
+        # check dimensions
+        assert points.shape == (3, np.product(imageshape))
+
         self.points = points
         self.imageshape = imageshape
         self.P1 = P1

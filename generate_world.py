@@ -8,6 +8,7 @@ import multiprocessing
 import generate_registrations
 import pointcloud
 import video
+from caching import cache_numpy_result
 
 
 def get_fundamental(u1, v1, u2, v2):
@@ -118,35 +119,24 @@ def estimate_projections(correspondences):
     return P1, P2, R, t
 
 
-def generate_cloud(correspondences, P1, P2, R, t):
-    corr1, corr2 = correspondences
-    imshape = corr1[:, :, 0].shape
-    shapey, shapex = imshape
+@cache_numpy_result(True, hash_method='readable')
+def triangulate_frames(vid, fnum1, fnum2):
+    vel = generate_registrations.load_velocity_fields(vid, fnum1, fnum2)[:, 50:-50, 50:-50]
+    corr1, corr2 = create_pixel_correspondences(vel)
+    P1, P2, R, t = estimate_projections((corr1, corr2))
 
     w1 = np.vstack((corr1[:, :, 0].flat, corr1[:, :, 1].flat))
     w2 = np.vstack((corr2[:, :, 0].flat, corr2[:, :, 1].flat))
-    # print("w1 as int", w1.astype(int))
-    # print("w2 as int", w2.astype(int))
-
-    # print("triangulating vertices")
     points = cv2.triangulatePoints(P1.astype(float), P2.astype(float), w1.astype(float), w2.astype(float))
-    # world = cv2.triangulatePoints(P, P2, w1, w2)  # crashes, bug in opencv
-    # print("triangulated.")
-    # world[:, mask.transpose()] = float('nan')
+    points = points[:-1, :] / points[-1, :]
 
-    points /= points[-1, :]
+    return points, vel, P1, P2, R, t
 
-    # check1 = P1.dot(points[:, points.shape[1] // 4])
-    # check1 /= check1[-1]
-    # print("check", check1, w1[:, points.shape[1] // 4])
-    #
-    # check2 = P2.dot(points[:, points.shape[1] // 4])
-    # check2 /= check2[-1]
-    # print("check", check2, w2[:, points.shape[1] // 4])
-    #
-    # print("world shape", points.shape)
 
-    return pointcloud.PointCloud(points[:-1, :], imshape, P1, P2, R, t)
+def generate_frame_pair_cloud(vid, fnumpair):
+    points, vel, P1, P2, R, t = triangulate_frames(vid, *fnumpair)
+    imshape = vel.shape[1:]
+    return pointcloud.PointCloud(points, imshape, P1, P2, R, t), vel
 
 
 def gen_binned_points(points, detail=50, minpointcount=4):
@@ -225,98 +215,64 @@ def gen_binned_points(points, detail=50, minpointcount=4):
     return avgpoints
 
 
-def gen_world_avg_pairs_gc(vid, fnums):
+def generate_world_cloud(vid, fnums, avg_size=5):
     # generate frame number pairs
     fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
-
-    vel0 = generate_registrations.load_velocity_fields(vid, *fnumpairs[0])
-
-    # generate pair velocity fields
-    # print("initial vel field shape", vel0.shape)
-    # crop vels
-    vel0 = vel0[:, 50:-50, 50:-50]
-    # print("cropped vel field shape", vel0.shape)
-
     nregs = len(fnumpairs)
-    imgshape = vel0[0].shape
-    shapey, shapex = imgshape  # todo: move before cropping?
+    if nregs < avg_size:
+        msg = "Moving average size avg_size ({a_s}) exceeds number of frame pairs ({f_p})".format(
+            a_s=avg_size, f_p=nregs)
+        raise ValueError(msg)
 
-    velshape = vel0[0].shape
-    del vel0
-    X, Y = np.meshgrid(np.arange(velshape[1], dtype=np.float32),
-                       np.arange(velshape[0], dtype=np.float32))
+    # get cloud dimensions
+    cloud0, vel0 = generate_frame_pair_cloud(vid, fnumpairs[0])
+    cloudshape = cloud0.get_shaped().shape
+    del cloud0, vel0
+
+    shapey, shapex, _ = cloudshape
+    X, Y = np.meshgrid(np.arange(shapex, dtype=np.float32),
+                       np.arange(shapey, dtype=np.float32))
 
     # generate moving average of clouds
-    avgperiod = 5
     avgpoints = np.ndarray((3, 0))
-    # generate pair clouds
     clouds = []
     vels = []
 
-    i = 0
-    for fnumpair in fnumpairs[:avgperiod-1]:
-        progress = int(i / nregs * 100)
-        print("\rProcessing frames\t{}%".format(progress), end='')
-        i += 1
+    for i, fnumpair in enumerate(fnumpairs):
+        print("\rProcessing frames {0:>4.0%}".format(i/nregs), end='')
 
-        vel = generate_registrations.load_velocity_fields(vid, *fnumpair)[:, 50:-50, 50:-50]
-        vels.append(vel)
-        corr = create_pixel_correspondences(vel)
-
-        P1, P2, R, t = estimate_projections(corr)
-        cloud = generate_cloud(corr, P1, P2, R, t)
+        cloud, vel = generate_frame_pair_cloud(vid, fnumpair)
         clouds.append(cloud)
-
-    cloudshape = clouds[0].get_shaped().shape
-
-    for i in range(nregs - (avgperiod - 1)):
-        progress = int((i + avgperiod) / nregs * 100)
-        print("\rProcessing frames\t{}%".format(progress), end='')
-
-        vel = generate_registrations.load_velocity_fields(
-            vid, *fnumpairs[i+avgperiod-1]
-        )[:, 50:-50, 50:-50]
         vels.append(vel)
-        corr = create_pixel_correspondences(vel)
 
-        P1, P2, R, t = estimate_projections(corr)
-        cloud = generate_cloud(corr, P1, P2, R, t)
-        clouds.append(cloud)
+        if i >= avg_size-1:
+            assert len(clouds) == avg_size  # todo: remove check
 
-        assert len(clouds) == avgperiod  # todo: remove check
+            moving_avg = np.zeros(cloudshape)
+            for j in range(avg_size):
+                p = clouds[j].get_shaped()
+                mapX = (X + vels[j][0, :, :] * shapex).astype('float32')
+                mapY = (Y + vels[j][1, :, :] * shapey).astype('float32')
+                moving_avg = p + cv2.remap(moving_avg, mapX, mapY, interpolation=cv2.INTER_LINEAR)
+                # try INTER_LANCZOS4, borderMode=cv2.BORDER_TRANSPARENT)
+            moving_avg /= avg_size
 
-        avg = np.zeros(cloudshape)
-        for j in range(avgperiod):
-            p = clouds[j].get_shaped()
-            mapX = (X + vels[j][0, :, :] * shapex).astype('float32')
-            mapY = (Y + vels[j][1, :, :] * shapey).astype('float32')
-            avg = p + cv2.remap(avg, mapX, mapY,
-                            interpolation=cv2.INTER_LINEAR,  # INTER_LANCZOS4,
-                            borderMode=cv2.BORDER_TRANSPARENT)
-        avg /= avgperiod
+            crop = 50
+            avgcloudX = moving_avg[400:-crop, crop:-crop, 0]
+            avgcloudY = moving_avg[400:-crop, crop:-crop, 1]
+            avgcloudZ = moving_avg[400:-crop, crop:-crop, 2]
+            avgcloudXYZ = np.vstack((avgcloudX.flat, avgcloudY.flat, avgcloudZ.flat))
+            # avgcloudXYZ = np.vstack((avg[:, :, 0].flat, avg[:, :, 1].flat, avg[:, :, 2].flat))
 
-        crop = 50
-        avgcloudX = avg[400:-crop, crop:-crop, 0]
-        avgcloudY = avg[400:-crop, crop:-crop, 1]
-        avgcloudZ = avg[400:-crop, crop:-crop, 2]
-        avgcloudXYZ = np.vstack((avgcloudX.flat, avgcloudY.flat, avgcloudZ.flat))
+            # shift into global coordinates, trusting R and t from the projection matrices to be correct
+            avgpoints = clouds[-1].R.dot(avgpoints) + clouds[-1].t  # shift the previous values into current space
+            avgpoints = np.hstack((avgpoints, avgcloudXYZ))  # then add current points
+            # print("avgpoints bytes", avgpoints.nbytes)
 
-        # avgcloud.points = pointcloud.align_points_with_xy(avgcloud.points)
-        # pointcloud.visualise_worlds_mplotlib(avgcloud)
+            # move clouds stack along
+            del clouds[0], vels[0]
 
-        # shift into global coordinates, trusting R and t from the projection matrices to be correct
-        avgpoints = clouds[-1].R.dot(avgpoints) + clouds[-1].t  # shift the previous values into current space
-        avgpoints = np.hstack((avgpoints, avgcloudXYZ))  # then add current points
-        # print("avgpoints bytes", avgpoints.nbytes)
-
-        # move clouds stack along
-        # clouds = clouds[1:]
-        # vels = vels[1:]
-        del clouds[0]
-        del vels[0]
-
-    print("\nProcessed frames")
-
+    print("\rProcessed frames")
     return avgpoints
 
 
@@ -325,29 +281,20 @@ def bin_and_render(avgpoints, fname=None):
     print("Binning points")
     world = gen_binned_points(avgpoints)
     del avgpoints
-
-    # if fname is not None:
-    #     print("exporting .mat file")
-    #     savemat('{}.mat'.format(fname), {
-    #         'X': X.flatten(),
-    #         'Y': Y.flatten(),
-    #         'Z': Z.flatten()
-    #     })
-
     pointcloud.visualise_heatmap(world, fname=fname)
 
 
-def generate_world(clip):
-    avgpoints = gen_world_avg_pairs_gc(clip.video, list(range(clip.start_frame, clip.stop_frame, 3)))
+def reconstruct_world(clip):
+    avgpoints = generate_world_cloud(clip.video, list(range(clip.start_frame, clip.stop_frame, 3)))
     bin_and_render(avgpoints, './output/{}_{}_singletrain_heatmap_neg'.format(clip.start_frame, clip.stop_frame))
 
 
 def multiprocfunc(f):
     vidl = video.Video(vid.path)  # todo: don't rely on vid from global
-    return gen_world_avg_pairs_gc(vidl, f)
+    return generate_world_cloud(vidl, f)
 
 
-def generate_world3(clip, multiproc=True):
+def reconstruct_world3(clip, multiproc=True):
     f1 = list(range(clip.start_frame+0, clip.stop_frame-2, 3))
     f2 = list(range(clip.start_frame+1, clip.stop_frame-1, 3))
     f3 = list(range(clip.start_frame+2, clip.stop_frame-0, 3))
@@ -361,9 +308,9 @@ def generate_world3(clip, multiproc=True):
                 (f1, f2, f3)
             )
     else:
-        points1 = gen_world_avg_pairs_gc(clip.video, f1)
-        points2 = gen_world_avg_pairs_gc(clip.video, f2)
-        points3 = gen_world_avg_pairs_gc(clip.video, f3)
+        points1 = generate_world_cloud(clip.video, f1)
+        points2 = generate_world_cloud(clip.video, f2)
+        points3 = generate_world_cloud(clip.video, f3)
 
     # # transform points to last frame
     # interpolate between final pair
@@ -390,14 +337,9 @@ def generate_world3(clip, multiproc=True):
     bin_and_render(avgpoints, './output/{}_{}_tripletrain_heatmap_neg'.format(clip.start_frame, clip.stop_frame))
 
 
-def gen_frame_pair(vid, f0, f1):
-    vel = generate_registrations.load_velocity_fields(vid, f0, f1)[:, 50:-50, 50:-50]
-
-    corr = create_pixel_correspondences(vel)
-    P1, P2, R, t = estimate_projections(corr)
-    cloud = generate_cloud(corr, P1, P2, R, t)
+def reconstruct_frame_pair(vid, f0, f1):
+    cloud, vel = generate_frame_pair_cloud(vid, (f0, f1))
     cloud.points = pointcloud.align_points_with_xy(cloud.points)
-
     pointcloud.visualise_worlds_mplotlib(cloud)
     # pointcloud.visualise_heatmap(cloud.points, fname="./output/{}_{}_single_pair".format(f0, f1))
 
@@ -424,6 +366,6 @@ if __name__ == "__main__":
         fname=clip.video.path, shape=clip.video.shape, fps=clip.video.fps,
         start=clip.start_frame, stop=clip.stop_frame))
 
-    generate_world3(clip)
+    reconstruct_world3(clip)
 
     print("Done.")
