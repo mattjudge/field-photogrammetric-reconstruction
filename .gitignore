@@ -1,11 +1,13 @@
+output/
+_cache/
+
 .idea
 *.pyc
-old
-old2
 *.npy
 *.pickle
 *.png
 *.gif
+
 
 # Windows image file caches
 Thumbs.db
@@ -16,15 +18,6 @@ Desktop.ini
 
 # Recycle Bin used on file shares
 $RECYCLE.BIN/
-
-# Windows Installer files
-*.cab
-*.msi
-*.msm
-*.msp
-
-# Windows shortcuts
-*.lnk
 
 # =========================
 # Operating System Files
@@ -56,7 +49,3 @@ Temporary Items
 .apdisk
 
 *.csv
-
-output/
-
-_cache/

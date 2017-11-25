@@ -10,12 +10,19 @@ import numpy as np
 
 CACHE_DIR = "./_cache/"
 
-# ensure cache directory exists
-try:
-    os.makedirs(CACHE_DIR)
-except OSError as e:
-    if e.errno != errno.EEXIST:
-        raise
+
+def make_dir(path):
+    try:
+        os.makedirs(path)
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
+
+
+def set_cache_dir(path):
+    global CACHE_DIR
+    CACHE_DIR = path
+    make_dir(CACHE_DIR)
 
 
 def _save_numpy(path, values, compress):
@@ -39,17 +46,32 @@ def _load_numpy(path):
         return tuple(npzfile[f] for f in files)
 
 
+def _trim_str_len(s, max_len):
+    return s[:max_len] if len(s) > max_len else s
+
+
 def _func_hash_md5(func, args, kwargs):
     return md5(str(
-        (func.__name__, args, frozenset(kwargs.items()))
+        (func.__name__, args, kwargs.items())
     ).encode()).hexdigest()
 
 
 def _func_hash_readable(func, args, kwargs):
-    return '{fnm}_{args}_{kwargs}_h{hash}'.format(
+    max_var_len = 20
+    max_filename_len = 100
+
+    def stringify_var(var):
+        # remove non-alphanumeric characters
+        s = ''.join(x for x in str(var) if x.isalnum())
+        return _trim_str_len(s, max_var_len)
+
+    slug = '{fnm}_{args}_{kwargs}'.format(
         fnm=func.__name__,
-        args='_'.join(str(x) for x in args),
-        kwargs='_'.join('_'.join(str(y) for y in kw) for kw in kwargs.items()),
+        args='_'.join(map(stringify_var, args)),
+        kwargs='_'.join('_'.join(map(stringify_var, kw)) for kw in kwargs.items())
+    )
+    return '{slug}_{hash}'.format(
+        slug=_trim_str_len(slug, max_filename_len - 11),  # minus hash and file extension
         hash=_func_hash_md5(func, args, kwargs)[:6]
     )
 
@@ -111,14 +133,17 @@ def cache_numpy_result(enable_cache, write_cache=True, force_update=False, compr
     return decorator
 
 
+# ensure cache directory exists
+make_dir(CACHE_DIR)
+
+
 if __name__ == '__main__':
-    pass
-    # logging.basicConfig(level=logging.DEBUG)
-    #
-    # @cache_numpy_result(True, hash_method='readable')
-    # def test(a, b):
-    #     return np.arange(a), np.arange(b)
-    #
-    # print(test(4, 5))
-    # print(test(5, 4))
-    # print(test(4, 5))
+    logging.basicConfig(level=logging.DEBUG)
+
+    @cache_numpy_result(True, hash_method='readable')
+    def test(a, b):
+        return np.arange(a), np.vstack([b, b])
+
+    print(test(4, b=np.array([[1, 2], [3, 4]])))
+    print(test(5, np.arange(3)))
+    print(test(4, b=np.array([[1, 2], [3, 4]])))

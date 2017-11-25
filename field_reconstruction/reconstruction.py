@@ -1,22 +1,12 @@
 
 import logging
-
-import numpy as np
-import cv2
 import multiprocessing
 
-import dtcwt_registration
-import pointcloud
-import video
-from caching import cache_numpy_result
+import cv2
+import numpy as np
 
-
-_cam_mat_K = None
-
-
-def set_camera_matrix(mat):
-    global _cam_mat_K
-    _cam_mat_K = mat
+from field_reconstruction import dtcwt_registration, pointcloud, video
+from field_reconstruction.caching import cache_numpy_result
 
 
 def get_fundamental(u1, v1, u2, v2):
@@ -99,10 +89,10 @@ def estimate_projections(correspondences, K):
 
 
 @cache_numpy_result(True, hash_method='readable')
-def triangulate_frames(vid, fnum1, fnum2):
-    vel = dtcwt_registration.load_velocity_fields(vid, fnum1, fnum2)[:, 50:-50, 50:-50]
+def triangulate_frames(vid, frame_pair, K):
+    vel = dtcwt_registration.load_velocity_fields(vid, *frame_pair)[:, 50:-50, 50:-50]
     corr1, corr2 = create_pixel_correspondences(vel)
-    P1, P2, R, t = estimate_projections((corr1, corr2), _cam_mat_K)
+    P1, P2, R, t = estimate_projections((corr1, corr2), K)
 
     w1 = np.vstack((corr1[:, :, 0].flat, corr1[:, :, 1].flat))
     w2 = np.vstack((corr2[:, :, 0].flat, corr2[:, :, 1].flat))
@@ -112,8 +102,8 @@ def triangulate_frames(vid, fnum1, fnum2):
     return points, vel, P1, P2, R, t
 
 
-def generate_frame_pair_cloud(vid, fnumpair):
-    points, vel, P1, P2, R, t = triangulate_frames(vid, *fnumpair)
+def generate_frame_pair_cloud(vid, frame_pair, K):
+    points, vel, P1, P2, R, t = triangulate_frames(vid, frame_pair, K)
     imshape = vel.shape[1:]
     return pointcloud.PointCloud(points, imshape, P1, P2, R, t), vel
 
@@ -193,7 +183,7 @@ def gen_binned_points(points, detail=50, minpointcount=4):
     return avgpoints
 
 
-def generate_world_cloud(vid, fnums, avg_size=5):
+def generate_world_cloud(vid, K, fnums, avg_size=5):
     # generate frame number pairs
     fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
     nregs = len(fnumpairs)
@@ -203,7 +193,7 @@ def generate_world_cloud(vid, fnums, avg_size=5):
         raise ValueError(msg)
 
     # get cloud dimensions
-    cloud0, vel0 = generate_frame_pair_cloud(vid, fnumpairs[0])
+    cloud0, vel0 = generate_frame_pair_cloud(vid, fnumpairs[0], K)
     cloudshape = cloud0.get_shaped().shape
     del cloud0, vel0
 
@@ -219,7 +209,7 @@ def generate_world_cloud(vid, fnums, avg_size=5):
     for i, fnumpair in enumerate(fnumpairs):
         print("\rProcessing frames {0:>4.0%}".format(i/nregs), end='')
 
-        cloud, vel = generate_frame_pair_cloud(vid, fnumpair)
+        cloud, vel = generate_frame_pair_cloud(vid, fnumpair, K)
         clouds.append(cloud)
         vels.append(vel)
 
@@ -262,12 +252,12 @@ def bin_and_render(avgpoints, fname=None):
     pointcloud.visualise_heatmap(world, path=fname, mode='plain')
 
 
-def _multiproc_process_frame_collection(vid_path, frames):
+def _multiproc_process_frame_collection(vid_path, frames, K):
     vidl = video.Video(vid_path)
-    return generate_world_cloud(vidl, frames)
+    return generate_world_cloud(vidl, K, frames)
 
 
-def reconstruct_world(clip, frame_step, include_intermediates=False, multiproc=True):
+def reconstruct_world(clip, K, frame_step, include_intermediates=False, multiproc=True):
     frame_collection = tuple(
         range(clip.start_frame + offset, clip.stop_frame - (frame_step-offset), frame_step)
         for offset in range(frame_step if include_intermediates else 1)
@@ -278,11 +268,11 @@ def reconstruct_world(clip, frame_step, include_intermediates=False, multiproc=T
         with multiprocessing.Pool() as p:
             points_collection = p.starmap(
                 _multiproc_process_frame_collection,
-                ((clip.video.path, frames) for frames in frame_collection)
+                ((clip.video.path, frames, K) for frames in frame_collection)
             )
     else:
         points_collection = list(map(
-            lambda frames: generate_world_cloud(clip.video, frames),
+            lambda frames: generate_world_cloud(clip.video, K, frames),
             frame_collection
         ))
 
@@ -295,7 +285,7 @@ def reconstruct_world(clip, frame_step, include_intermediates=False, multiproc=T
 
         # Assume R = eye  # todo: cube root homogeneous matrix?
         corr = create_pixel_correspondences(vel)
-        _, _, R, T = estimate_projections(corr, _cam_mat_K)
+        _, _, R, T = estimate_projections(corr, K)
         points = np.hstack((
             points_collection[i] + T * (frame_step-(i+1))/frame_step for i in range(frame_step)
         ))
@@ -307,17 +297,16 @@ def reconstruct_world(clip, frame_step, include_intermediates=False, multiproc=T
     return gen_binned_points(points)
 
 
-def reconstruct_frame_pair(vid, f0, f1):
-    cloud, vel = generate_frame_pair_cloud(vid, (f0, f1))
+def reconstruct_frame_pair(vid, K, f0, f1):
+    cloud, vel = generate_frame_pair_cloud(vid, K, (f0, f1))
     cloud.points = pointcloud.align_points_with_xy(cloud.points)
     pointcloud.visualise_worlds_mplotlib(cloud)
     # pointcloud.visualise_heatmap(cloud.points, fname="./output/{}_{}_single_pair".format(f0, f1))
 
 
-def render_reconstruct_world(clip, frame_step, path=None, include_intermediates=False, multiproc=True):
-    world_points = reconstruct_world(clip=clip, frame_step=frame_step,
-                                     include_intermediates=include_intermediates,
-                                     multiproc=multiproc)
+def render_reconstruct_world(clip, K, frame_step, path=None, include_intermediates=False, multiproc=True):
+    world_points = reconstruct_world(clip=clip, K=K, frame_step=frame_step,
+                                     include_intermediates=include_intermediates, multiproc=multiproc)
 
     save_path = '{base}_{start}_{stop}_{step}_{incl}'.format(
         base=path, start=clip.start_frame, stop=clip.stop_frame, step=frame_step,
@@ -328,35 +317,4 @@ def render_reconstruct_world(clip, frame_step, path=None, include_intermediates=
 
 
 if __name__ == "__main__":
-    # logging.root.setLevel(logging.DEBUG)
-    vid = video.Video(r"../../../../../YUNC0001.mp4")
-    clip = video.Clip(vid, 26400, 26460)
-    # 9900, 9920
-    # 20750, 20850
-    # 20750, 20800
-    # 9900, 10100
-    # 9900, 9930
-    # 26400, 26460
-    # 10101, 10160
-    # 26400, 26500
-    # 31302, 31600
-    # 31590, 31900
-    # 13100, 13200
-    # 14550, 14610
-    # 15000, 15200
-
-    print("Loaded video {fname}, shape: {shape}, fps: {fps}, start: {start}, stop: {stop}".format(
-        fname=clip.video.path, shape=clip.video.shape, fps=clip.video.fps,
-        start=clip.start_frame, stop=clip.stop_frame))
-
-    # estimated from tractor treads in video
-    set_camera_matrix(np.array(
-        [[1883, 0, 910],
-         [0, 1883, 490],
-         [0, 0, 1]]
-    ))
-
-    # reconstruct_world(clip, 3, include_intermediates=True)
-    render_reconstruct_world(clip, 3, path='./output/', include_intermediates=True, multiproc=True)
-
-    print("Done.")
+    pass

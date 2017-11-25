@@ -1,7 +1,9 @@
 import logging
 
-import numpy as np
+import os
+import errno
 
+import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 import matplotlib.pyplot as plt
@@ -119,6 +121,14 @@ def set_axes_equal(ax):
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
 
+def _make_dir_for_file(fpath):
+    try:
+        os.makedirs(os.path.dirname(fpath))
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
+
+
 def visualise_heatmap(points, path=None, detail=30, gsigma=0, mode='cutthru'):
     # detail = bins per unit
     pts = points[:, ~np.isnan(points[-1, :])]
@@ -219,6 +229,7 @@ def visualise_heatmap(points, path=None, detail=30, gsigma=0, mode='cutthru'):
 
     if path is not None:
         path = '{}_gsigma{}'.format(path, gsigma)
+        _make_dir_for_file(path)
         fig.savefig('{}_mode{}.pdf'.format(path, mode), dpi=1000)
         savemat('{}.mat'.format(path), {
             'X': X,
@@ -263,6 +274,7 @@ def visualise_worlds_mplotlib(*worlds, method="surf", fname=None):
 
     set_axes_equal(ax)
     if fname is not None:
+        _make_dir_for_file(fname)
         plt.savefig(fname)
     plt.show()
     return plt
