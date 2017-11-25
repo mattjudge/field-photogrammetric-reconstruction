@@ -66,9 +66,9 @@ def align_points_with_xy(points):
     # or expressed using matrix/vector product
     # Z = np.dot(np.c_[XX, YY, np.ones(XX.shape)], C).reshape(X.shape)
 
-    centroid = np.mean(notnan_points, axis=1, keepdims=True)
+    # centroid = np.mean(notnan_points, axis=1, keepdims=True)
+    centroid = np.median(notnan_points, axis=1, keepdims=True)
     logging.info("Centroid: {}".format(centroid))
-    points -= centroid
 
     cos_t = 1 / np.sqrt(C[0] ** 2 + C[1] ** 2 + 1)
     sin_t = np.sin(np.arccos(cos_t))
@@ -84,7 +84,7 @@ def align_points_with_xy(points):
         [-uy * sin_t, ux * sin_t, cos_t]
     ])
 
-    return R.dot(points)
+    return R.dot(points - centroid)
 
 
 def set_axes_equal(ax):
@@ -119,7 +119,7 @@ def set_axes_equal(ax):
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
 
-def visualise_heatmap(points, fname=None, detail=30, gsigma=0, mode='cutthru'):
+def visualise_heatmap(points, path=None, detail=30, gsigma=0, mode='cutthru'):
     # detail = bins per unit
     pts = points[:, ~np.isnan(points[-1, :])]
 
@@ -143,7 +143,6 @@ def visualise_heatmap(points, fname=None, detail=30, gsigma=0, mode='cutthru'):
     if gsigma > 0:
         Z = ndimage.gaussian_filter(Z, sigma=gsigma, order=0)
 
-    finshape = Z.shape
     logging.info("Final Z shape: {}".format(Z.shape))
 
     print("Rendering")
@@ -218,10 +217,10 @@ def visualise_heatmap(points, fname=None, detail=30, gsigma=0, mode='cutthru'):
         cb = fig.colorbar(p)
         cb.set_label('Crop height deviation (z) [m]')
 
-    if fname is not None:
-        fname = '{}_gsigma{}'.format(fname, gsigma)
-        fig.savefig('{}_mode{}.pdf'.format(fname, mode), dpi=1000)
-        savemat('{}.mat'.format(fname), {
+    if path is not None:
+        path = '{}_gsigma{}'.format(path, gsigma)
+        fig.savefig('{}_mode{}.pdf'.format(path, mode), dpi=1000)
+        savemat('{}.mat'.format(path), {
             'X': X,
             'Y': Y,
             'Z': Z

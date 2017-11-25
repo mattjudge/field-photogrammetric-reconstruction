@@ -5,10 +5,18 @@ import numpy as np
 import cv2
 import multiprocessing
 
-import generate_registrations
+import dtcwt_registration
 import pointcloud
 import video
 from caching import cache_numpy_result
+
+
+_cam_mat_K = None
+
+
+def set_camera_matrix(mat):
+    global _cam_mat_K
+    _cam_mat_K = mat
 
 
 def get_fundamental(u1, v1, u2, v2):
@@ -16,10 +24,8 @@ def get_fundamental(u1, v1, u2, v2):
     v1 = v1.reshape((-1, 1))
     u2 = u2.reshape((-1, 1))
     v2 = v2.reshape((-1, 1))
-    LHS = np.hstack([u2*u1, u2*v1, u2, v2*u1, v2*v1, v2, u1, v1, np.ones_like(v1)])
-    U, s, VT = np.linalg.svd(LHS)
-    # print(np.min(s), s.flatten()[-1])  # verify last column of V is nullspace
-    # NS = VT[:, -1:].transpose()
+    lhs = np.hstack([u2*u1, u2*v1, u2, v2*u1, v2*v1, v2, u1, v1, np.ones_like(v1)])
+    U, s, VT = np.linalg.svd(lhs)
     NS = VT[-1:, :].transpose()
     return NS.reshape((3, 3)) / NS[-1]
 
@@ -77,53 +83,26 @@ def create_pixel_correspondences(vel):
     return np.dstack((u1shaped, v1shaped)), np.dstack((u2shaped, v2shaped))
 
 
-def estimate_projections(correspondences):
+def estimate_projections(correspondences, K):
     # points should be pre-cropped to ensure good data points (otherwise E becomes unstable)
     corr1, corr2 = correspondences
-    imshape = corr1[:, :, 0].shape
-    shapey, shapex = imshape
 
     w1 = np.vstack((corr1[:, :, 0].flat, corr1[:, :, 1].flat))
     w2 = np.vstack((corr2[:, :, 0].flat, corr2[:, :, 1].flat))
-    # print("w1 as int", w1.astype(int))
-    # print("w2 as int", w2.astype(int))
 
-    # TODO: ensure shapex, shapey are correct estimations given cropping of vels
-    fku = 1883  # estimated
-    K = np.array([[fku,     0, shapex//2],
-                  [0,     fku, shapey//2],
-                  [0,       0,         1]])
-
-    # E, mask = cv2.findEssentialMat(w1.transpose(), w2.transpose(), 2000, (shapey//2, shapex//2))
     E, mask = cv2.findEssentialMat(w1.transpose(), w2.transpose(), K)
-    # print("E", E)
-    # print("mask", mask.T)
-    # print(np.sum(mask), ":", mask.size)
-    # print(mask.size - np.sum(mask))
-    # print((mask.size - np.sum(mask)) / mask.size)
 
-    # print("recovering pose")
-    # retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=mask)
     # TODO: refine sampling method
-    retval, R, t, mask = cv2.recoverPose(E, w1[:,::100].transpose(), w2[:,::100].transpose(), K, mask=None)
+    retval, R, t, mask = cv2.recoverPose(E, w1[:, ::100].transpose(), w2[:, ::100].transpose(), K, mask=None)
     P1, P2 = get_projections_from_rt(K, R, t)
-    # print("R", R)
-    # print("t", t)
-    # print("P1", P1)
-    # print("P2", P2)
-
-    # print("mask", mask.T)
-    # print(np.sum(mask), ":", mask.size)
-    # print(mask.size - np.sum(mask))
-    # print((mask.size - np.sum(mask)) / mask.size)
     return P1, P2, R, t
 
 
 @cache_numpy_result(True, hash_method='readable')
 def triangulate_frames(vid, fnum1, fnum2):
-    vel = generate_registrations.load_velocity_fields(vid, fnum1, fnum2)[:, 50:-50, 50:-50]
+    vel = dtcwt_registration.load_velocity_fields(vid, fnum1, fnum2)[:, 50:-50, 50:-50]
     corr1, corr2 = create_pixel_correspondences(vel)
-    P1, P2, R, t = estimate_projections((corr1, corr2))
+    P1, P2, R, t = estimate_projections((corr1, corr2), _cam_mat_K)
 
     w1 = np.vstack((corr1[:, :, 0].flat, corr1[:, :, 1].flat))
     w2 = np.vstack((corr2[:, :, 0].flat, corr2[:, :, 1].flat))
@@ -139,32 +118,31 @@ def generate_frame_pair_cloud(vid, fnumpair):
     return pointcloud.PointCloud(points, imshape, P1, P2, R, t), vel
 
 
+def get_outlier_mask(points, percentile_discard):
+    # filter outliers
+    # print(np.median(points, axis=1))
+    # print(np.percentile(points, [0., 10., 25., 50., 75., 90., 100.], axis=1))
+    limits = np.percentile(points, [float(percentile_discard), 100.0 - percentile_discard], axis=1)
+    lower_limit = limits[0, :]
+    upper_limit = limits[-1, :]
+
+    outlier_mask = (
+        (points[0, :] >= lower_limit[0]) & (points[0, :] <= upper_limit[0]) &
+        (points[1, :] >= lower_limit[1]) & (points[1, :] <= upper_limit[1]) &
+        (points[2, :] >= lower_limit[2]) & (points[2, :] <= upper_limit[2])
+    )
+    return outlier_mask
+
+
 def gen_binned_points(points, detail=50, minpointcount=4):
     logging.info("binning points shape: {}".format(points.shape))
     # detail = bins per unit
     # minpointcount = min number of points in a bin for that bin to be accepted
 
-    # remove outliers
-    def getoutliermask(data, m=3.):
-        # ref: https://stackoverflow.com/a/16562028
-        d = np.abs(data - np.median(data))
-        mdev = np.median(d)
-        s = d / mdev if mdev else 0.
-        return s < m
-
-    # outliermask = getoutliermask(points[0, :])
-    # outliermask = np.logical_and(
-    #     getoutliermask(points[0, :]),
-    #     getoutliermask(points[1, :]),
-    #     getoutliermask(points[2, :])
-    # )
-    # outliermasksum = np.sum(outliermask)
-    # print("outliermask accepts {} out of {} ({}%)".format(
-    #     outliermasksum,
-    #     points[2, :].shape,
-    #     int(outliermasksum / points[2, :].shape * 100)
-    # ))
-    # points = points[:, outliermask]
+    orig_points_shape = points.shape
+    points = points[:, get_outlier_mask(points, 1)]
+    # points = points[:, get_outlier_mask(pointcloud.align_points_with_xy(points), 10)]
+    print("Removed outliers, kept {0:.0%}".format(points.shape[1] / orig_points_shape[1]))
 
     xmin, ymin, zmin = np.floor(np.min(points, axis=1)).astype(int)
     xmax, ymax, zmax = np.ceil(np.max(points, axis=1)).astype(int)
@@ -281,60 +259,52 @@ def bin_and_render(avgpoints, fname=None):
     print("Binning points")
     world = gen_binned_points(avgpoints)
     del avgpoints
-    pointcloud.visualise_heatmap(world, fname=fname)
+    pointcloud.visualise_heatmap(world, path=fname, mode='plain')
 
 
-def reconstruct_world(clip):
-    avgpoints = generate_world_cloud(clip.video, list(range(clip.start_frame, clip.stop_frame, 3)))
-    bin_and_render(avgpoints, './output/{}_{}_singletrain_heatmap_neg'.format(clip.start_frame, clip.stop_frame))
+def _multiproc_process_frame_collection(vid_path, frames):
+    vidl = video.Video(vid_path)
+    return generate_world_cloud(vidl, frames)
 
 
-def multiprocfunc(f):
-    vidl = video.Video(vid.path)  # todo: don't rely on vid from global
-    return generate_world_cloud(vidl, f)
-
-
-def reconstruct_world3(clip, multiproc=True):
-    f1 = list(range(clip.start_frame+0, clip.stop_frame-2, 3))
-    f2 = list(range(clip.start_frame+1, clip.stop_frame-1, 3))
-    f3 = list(range(clip.start_frame+2, clip.stop_frame-0, 3))
-    logging.debug("Frame lists: \n{}\n{}\n{}".format(f1, f2, f3))
+def reconstruct_world(clip, frame_step, include_intermediates=False, multiproc=True):
+    frame_collection = tuple(
+        range(clip.start_frame + offset, clip.stop_frame - (frame_step-offset), frame_step)
+        for offset in range(frame_step if include_intermediates else 1)
+    )
 
     if multiproc:
         print("Starting multiprocessing pool")
         with multiprocessing.Pool() as p:
-            points1, points2, points3 = p.map(
-                multiprocfunc,
-                (f1, f2, f3)
+            points_collection = p.starmap(
+                _multiproc_process_frame_collection,
+                ((clip.video.path, frames) for frames in frame_collection)
             )
     else:
-        points1 = generate_world_cloud(clip.video, f1)
-        points2 = generate_world_cloud(clip.video, f2)
-        points3 = generate_world_cloud(clip.video, f3)
+        points_collection = list(map(
+            lambda frames: generate_world_cloud(clip.video, frames),
+            frame_collection
+        ))
 
-    # # transform points to last frame
-    # interpolate between final pair
-    finalpair = f3[-2:]
-    logging.debug("finalpair {}".format(finalpair))
+    if include_intermediates:
+        # transform points to last frame
+        finalpair = frame_collection[-1][-2:]
+        logging.debug("finalpair {}".format(finalpair))
 
-    vel = generate_registrations.load_velocity_fields(clip.video, *finalpair)[:, 50:-50, 50:-50]
-    vel1 = vel * 2/3
-    vel2 = vel * 1/3
+        vel = dtcwt_registration.load_velocity_fields(clip.video, *finalpair)[:, 50:-50, 50:-50]
 
-    imgshape = vel[0].shape
-    shapey, shapex = imgshape  # todo: move before cropping
+        # Assume R = eye  # todo: cube root homogeneous matrix?
+        corr = create_pixel_correspondences(vel)
+        _, _, R, T = estimate_projections(corr, _cam_mat_K)
+        points = np.hstack((
+            points_collection[i] + T * (frame_step-(i+1))/frame_step for i in range(frame_step)
+        ))
+    else:
+        points = points_collection[0]
+    del points_collection
 
-    # Assume R = eye  # todo: cube root homogeneous matrix
-    corr = create_pixel_correspondences(vel)
-    _, _, R, T = estimate_projections(corr)
-    avgpoints = np.hstack((
-        points1 + T * 2/3,
-        points2 + T * 1/3,
-        points3
-    ))
-    # print("R, T", R, T)
-
-    bin_and_render(avgpoints, './output/{}_{}_tripletrain_heatmap_neg'.format(clip.start_frame, clip.stop_frame))
+    print("Binning points")
+    return gen_binned_points(points)
 
 
 def reconstruct_frame_pair(vid, f0, f1):
@@ -342,6 +312,19 @@ def reconstruct_frame_pair(vid, f0, f1):
     cloud.points = pointcloud.align_points_with_xy(cloud.points)
     pointcloud.visualise_worlds_mplotlib(cloud)
     # pointcloud.visualise_heatmap(cloud.points, fname="./output/{}_{}_single_pair".format(f0, f1))
+
+
+def render_reconstruct_world(clip, frame_step, path=None, include_intermediates=False, multiproc=True):
+    world_points = reconstruct_world(clip=clip, frame_step=frame_step,
+                                     include_intermediates=include_intermediates,
+                                     multiproc=multiproc)
+
+    save_path = '{base}_{start}_{stop}_{step}_{incl}'.format(
+        base=path, start=clip.start_frame, stop=clip.stop_frame, step=frame_step,
+        incl=('multitrain' if include_intermediates else 'singletrain')
+    )
+
+    return pointcloud.visualise_heatmap(world_points, path=save_path, mode='plain')
 
 
 if __name__ == "__main__":
@@ -366,6 +349,14 @@ if __name__ == "__main__":
         fname=clip.video.path, shape=clip.video.shape, fps=clip.video.fps,
         start=clip.start_frame, stop=clip.stop_frame))
 
-    reconstruct_world3(clip)
+    # estimated from tractor treads in video
+    set_camera_matrix(np.array(
+        [[1883, 0, 910],
+         [0, 1883, 490],
+         [0, 0, 1]]
+    ))
+
+    # reconstruct_world(clip, 3, include_intermediates=True)
+    render_reconstruct_world(clip, 3, path='./output/', include_intermediates=True, multiproc=True)
 
     print("Done.")
