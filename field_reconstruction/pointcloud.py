@@ -1,3 +1,13 @@
+
+"""
+Author: Matt Judge 2017, except `set_axes_equal`
+
+This module provides:
+    :class:`Pointcloud` as a container for point clouds and associated projection matrices
+    :func:`align_points_with_xy` to align point clouds on the XY plane
+    :func:`visualise_heatmap` to interpolate and render pre-binned point clouds
+"""
+
 import logging
 
 import os
@@ -14,7 +24,7 @@ from scipy.io import savemat
 class PointCloud:
     def __init__(self, points, imageshape, P1, P2, R, t):
         """
-        Generate a point cloud
+        Container for a point cloud and related projection matrices
         :param points: A 3xN homogeneous array of [X, Y, Z]^T points in 3D space
         :param imageshape: The (y,x) image shape from which the points were obtained
         :param P1: The projection matrix of the first frame camera
@@ -23,8 +33,7 @@ class PointCloud:
         :param t: The translation mapping the first camera to the second after rotation R
         """
 
-        # check dimensions
-        assert points.shape == (3, np.product(imageshape))
+        assert points.shape == (3, np.product(imageshape))  # check dimensions
 
         self.points = points
         self.imageshape = imageshape
@@ -35,7 +44,7 @@ class PointCloud:
 
     def get_shaped(self):
         """
-        :return: A XxYx3 array of the points reshaped into self.imageshape
+        :return: A [Y,X,3] array of self.points reshaped into self.imageshape
         """
         return np.dstack([
             self.points[0, :].reshape(self.imageshape),
@@ -46,36 +55,24 @@ class PointCloud:
 
 def align_points_with_xy(points):
     """
-    Applies rotation and translation to align points with the xy plane
-    Ref: http://math.stackexchange.com/questions/1167717/transform-a-plane-to-the-xy-plane
-    :param points: Points to align
-    :return: Aligned points
+    Applies rotation and translation to align point cloud with the xy plane
+    Maths Ref: http://math.stackexchange.com/questions/1167717/transform-a-plane-to-the-xy-plane
+    :param points: [3,N] numpy array of points to align
+    :return: [3,N] numpy array of aligned points
     """
 
-    # regular grid covering the domain of the data
-    X, Y = np.meshgrid(np.arange(-0.5, 0.5, 0.05), np.arange(-0.5, 0.5, 0.05))
-    XX = X.flatten()
-    YY = Y.flatten()
     notnan_points = points[:, ~np.isnan(points[-1,:])]
-    data = notnan_points.transpose()
-    # best-fit linear plane
-    A = np.c_[data[:, 0], data[:, 1], np.ones(data.shape[0])]
-    C, _, _, _ = np.linalg.lstsq(A, data[:, 2])  # coefficients
 
-    # evaluate it on grid
-    Z = C[0] * X + C[1] * Y + C[2]
+    a = np.hstack((notnan_points[:-1, :].T, np.ones((notnan_points.shape[1], 1))))
+    c, _, _, _ = np.linalg.lstsq(a, notnan_points[2, :])
 
-    # or expressed using matrix/vector product
-    # Z = np.dot(np.c_[XX, YY, np.ones(XX.shape)], C).reshape(X.shape)
-
-    # centroid = np.mean(notnan_points, axis=1, keepdims=True)
     centroid = np.median(notnan_points, axis=1, keepdims=True)
     logging.info("Centroid: {}".format(centroid))
 
-    cos_t = 1 / np.sqrt(C[0] ** 2 + C[1] ** 2 + 1)
+    cos_t = 1 / np.sqrt(c[0] ** 2 + c[1] ** 2 + 1)
     sin_t = np.sin(np.arccos(cos_t))
-    ux = cos_t * -C[1]
-    uy = cos_t * C[0]
+    ux = cos_t * -c[1]
+    uy = cos_t * c[0]
     n = np.sqrt(ux ** 2 + uy ** 2)
     ux /= n
     uy /= n
@@ -122,6 +119,10 @@ def set_axes_equal(ax):
 
 
 def _make_dir_for_file(fpath):
+    """
+    Helper function to ensure the path to a file exists and if not, create the required folder structure
+    :param fpath: Path to file
+    """
     try:
         os.makedirs(os.path.dirname(fpath))
     except OSError as e:
@@ -129,8 +130,20 @@ def _make_dir_for_file(fpath):
             raise
 
 
-def visualise_heatmap(points, path=None, detail=30, gsigma=0, mode='cutthru'):
-    # detail = bins per unit
+def visualise_heatmap(points, path=None, detail=30, gsigma=0, scale=1, mode='standard'):
+    """
+    Interpolates a point cloud into a regular grid, rendering a heatmap and optionally saving as .png and .mat files.
+    The .mat file can be further processed by external tools into a surface plot.
+    :param points: A [3,N] numpy array of points
+    :param path: The path in which to save output files. No files will be saved if set to None.
+    :param detail: The detail with which to interpolate the point cloud
+    :param gsigma: The level of gaussian smoothing to apply (default to 0, no smoothing)
+    :param scale: Scale to apply to the 3 axis, defaults to 1
+    :param mode: Either 'standard' or 'cutthru'.
+            'standard': Render a standard heatmap
+            'cutthru': Include two cross sectional lines
+    :return:
+    """
     pts = points[:, ~np.isnan(points[-1, :])]
 
     xmin, ymin, zmin = np.floor(np.min(pts, axis=1)).astype(int)
@@ -158,12 +171,21 @@ def visualise_heatmap(points, path=None, detail=30, gsigma=0, mode='cutthru'):
     print("Rendering")
 
     # scale XYZ
-    scale = 3.3
     X /= scale
     Y /= scale
     Z /= scale
 
-    if mode == 'cutthru':
+    if mode == 'standard':
+        fig = plt.figure()
+        ax = fig.gca()
+        p = plt.imshow(Z, cmap='gray',  # cmap='hot',
+                   extent=(np.min(X), np.max(X), np.max(Y), np.min(Y)),
+                   interpolation='nearest', aspect='equal', origin='upper')  # set the aspect ratio to auto to fill the space.
+        ax.set_xlabel('x [m]')
+        ax.set_ylabel('y [m]')
+        cb = fig.colorbar(p)
+        cb.set_label('Crop height deviation (z) [m]')
+    elif mode == 'cutthru':
         # create a 2 X 2 grid
         # gs = grd.GridSpec(3, 2, height_ratios=[6, 1, 1], width_ratios=[10, 1], wspace=0.2)
         fig, axes = plt.subplots(3, 2, sharex='col', subplot_kw=dict(),
@@ -215,17 +237,8 @@ def visualise_heatmap(points, path=None, detail=30, gsigma=0, mode='cutthru'):
         # hide unwanted
         axes[1, 1].axis('off')
         axes[2, 1].axis('off')
-
     else:
-        fig = plt.figure()
-        ax = fig.gca()
-        p = plt.imshow(Z, cmap='gray',  # cmap='hot',
-                   extent=(np.min(X), np.max(X), np.max(Y), np.min(Y)),
-                   interpolation='nearest', aspect='equal', origin='upper')  # set the aspect ratio to auto to fill the space.
-        ax.set_xlabel('x [m]')
-        ax.set_ylabel('y [m]')
-        cb = fig.colorbar(p)
-        cb.set_label('Crop height deviation (z) [m]')
+        raise ValueError('Unknown render mode')
 
     if path is not None:
         path = '{}_gsigma{}'.format(path, gsigma)
@@ -241,7 +254,14 @@ def visualise_heatmap(points, path=None, detail=30, gsigma=0, mode='cutthru'):
     return fig
 
 
-def visualise_worlds_mplotlib(*worlds, method="surf", fname=None):
+def _visualise_worlds_mplotlib(*worlds, method="surf", fname=None):
+    """
+    Legacy function to produce a surface render using matplotlib
+    :param worlds:
+    :param method:
+    :param fname:
+    :return:
+    """
     fig = plt.figure()
     ax = fig.gca(projection='3d')
     ax.set_aspect('equal')
@@ -280,7 +300,14 @@ def visualise_worlds_mplotlib(*worlds, method="surf", fname=None):
     return plt
 
 
-def visualise_world_visvis(X, Y, Z, format="surf"):
+def _visualise_world_visvis(X, Y, Z, format="surf"):
+    """
+    Legacy function to produce a surface render using visvis
+    :param X:
+    :param Y:
+    :param Z:
+    :param format:
+    """
     import visvis as vv
 
     # m2 = vv.surf(worldx[::detail], worldy[::detail], worldz[::detail])

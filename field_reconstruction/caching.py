@@ -11,7 +11,7 @@ import numpy as np
 CACHE_DIR = "./_cache/"
 
 
-def make_dir(path):
+def _make_dir(path):
     try:
         os.makedirs(path)
     except OSError as e:
@@ -22,7 +22,7 @@ def make_dir(path):
 def set_cache_dir(path):
     global CACHE_DIR
     CACHE_DIR = path
-    make_dir(CACHE_DIR)
+    _make_dir(CACHE_DIR)
 
 
 def _save_numpy(path, values, compress):
@@ -134,7 +134,7 @@ def cache_numpy_result(enable_cache, write_cache=True, force_update=False, compr
 
 
 # ensure cache directory exists
-make_dir(CACHE_DIR)
+_make_dir(CACHE_DIR)
 
 
 if __name__ == '__main__':

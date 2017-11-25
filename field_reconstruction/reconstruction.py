@@ -1,4 +1,26 @@
 
+"""
+Author: Matt Judge 2017
+
+This module provides:
+    :func:`render_reconstruct_world` as a helper function to reconstruct and render a clip of video
+    :func:`reconstruct_world` to create a 3D reconstruction of a clip of video
+    :func:`reconstruct_frame_pair` to triangulate and reconstruct two frames
+    :func:`generate_world_cloud` to generate a dense point cloud from a video, utilising a moving average
+    :func:`gen_binned_points` to bin a dense point cloud and average over reliable bins
+    :func:`get_outlier_mask` to determine outliers in a dense point cloud
+    :func:`generate_frame_pair_cloud` to create an instance of :class:`pointcloud.Pointcloud` from two frames
+    :func:`triangulate_frames` to generate a point cloud from two frames
+    :func:`estimate_projections` to estimate projection matrices (P1, P2, R, T) from pixel
+            correspondences and camera matrix
+    :func:`create_pixel_correspondences` to create pixel correspondences from relative motion velocities
+    :func:`get_projections_from_rt` to get projection matrices from R and T
+
+    And legacy functions:
+    :func:`get_fundamental` to get the Fundamental matrix from corresponding pixel positions
+    :func:`get_rt` to get rotation R and translation T matrices from the essential matrix E
+"""
+
 import logging
 import multiprocessing
 
@@ -10,6 +32,7 @@ from field_reconstruction.caching import cache_numpy_result
 
 
 def get_fundamental(u1, v1, u2, v2):
+    """Legacy function to get the Fundamental matrix from corresponding pixel positions"""
     u1 = u1.reshape((-1, 1))
     v1 = v1.reshape((-1, 1))
     u2 = u2.reshape((-1, 1))
@@ -21,6 +44,7 @@ def get_fundamental(u1, v1, u2, v2):
 
 
 def get_rt(E):
+    """Legacy function to get rotation R and translation T matrices from the essential matrix E"""
     U, s, VT = np.linalg.svd(E)
     Tx = U.dot(
         np.array([
@@ -48,6 +72,13 @@ def get_rt(E):
 
 
 def get_projections_from_rt(K, R, t):
+    """
+    Get projection matrices from R and T
+    :param K: [3,3] Camera calibration matrix
+    :param R: [3,3] Rotation matrix
+    :param t: [3,1] Translation matrix
+    :return: P1, P2, projection matrices, both [3,4]
+    """
     P1 = K.dot(
         np.hstack([np.eye(3), np.zeros((3, 1))])
     )
@@ -58,6 +89,11 @@ def get_projections_from_rt(K, R, t):
 
 
 def create_pixel_correspondences(vel):
+    """
+    Create pixel correspondences from relative motion velocities
+    :param vel: Motion velocities from :func:`dtcwt_registration.load_velocity_fields`, a [2,Y,X] array
+    :return: tuple of two pixel correspondences, each a [Y,X] array corresponding to one frame
+    """
     velx, vely = vel
     imshape = velx.shape
     shapey, shapex = imshape
@@ -74,7 +110,17 @@ def create_pixel_correspondences(vel):
 
 
 def estimate_projections(correspondences, K):
-    # points should be pre-cropped to ensure good data points (otherwise E becomes unstable)
+    """
+    Estimate the projection matrices given point correspondences and the camera calibration matrix K
+    :param correspondences: Tuple of two frame correspondences (each [X,Y] matrices). Should be
+        pre-cropped to ensure good data points (otherwise E becomes unstable)
+    :param K: [3,3] Camera calibration matrix
+    :return:P1, P2, R, t Camera projection matrices:
+        P1: Projection to frame 1
+        P2: Projection to frame 2
+        R: Rotation from frame 1 to frame 2
+        t: Translation from frame 1 to frame 2
+    """
     corr1, corr2 = correspondences
 
     w1 = np.vstack((corr1[:, :, 0].flat, corr1[:, :, 1].flat))
@@ -90,6 +136,19 @@ def estimate_projections(correspondences, K):
 
 @cache_numpy_result(True, hash_method='readable')
 def triangulate_frames(vid, frame_pair, K):
+    """
+    Perform point triangulation from two frames of a video
+    :param vid: :class:video.Video object from which to take the frames
+    :param frame_pair: Tuple of two frame numbers (frame1, frame2)
+    :param K: [3,3] Camera calibration matrix
+    :returns: points, velocities, P1, P2, R, t
+        WHERE
+        points are a [3, N] numpy array point cloud
+        velocities are the velocities returned by the dtcwt transform
+            as a [2, Y, X] numpy array (see :func:`dtcwt_registration.load_velocity_fields`)
+        P1, P2, R, t are the projection matrix parameters
+                        returned by :func:`estimate_projections`)
+    """
     vel = dtcwt_registration.load_velocity_fields(vid, *frame_pair)[:, 50:-50, 50:-50]
     corr1, corr2 = create_pixel_correspondences(vel)
     P1, P2, R, t = estimate_projections((corr1, corr2), K)
@@ -103,13 +162,30 @@ def triangulate_frames(vid, frame_pair, K):
 
 
 def generate_frame_pair_cloud(vid, frame_pair, K):
+    """
+    Generates a instance of :class:`pointcloud.Pointcloud` from a pair of frames of a :class:`video.Video`.
+    :param vid: :class:video.Video object from which to take the frames
+    :param frame_pair: Tuple of two frame numbers (frame1, frame2)
+    :param K: [3,3] Camera calibration matrix
+    :return: pointcloud, velocities
+            WHERE
+            pointcloud is an instance of :class:`pointcloud.Pointcloud`
+            velocities are the velocities returned by the dtcwt transform
+                as a [2, Y, X] numpy array (see :func:`dtcwt_registration.load_velocity_fields`)
+    """
     points, vel, P1, P2, R, t = triangulate_frames(vid, frame_pair, K)
     imshape = vel.shape[1:]
     return pointcloud.PointCloud(points, imshape, P1, P2, R, t), vel
 
 
 def get_outlier_mask(points, percentile_discard):
-    # filter outliers
+    """
+    Generate a mask identifying outliers in a point cloud
+    :param points: A [3, N] numpy array of points
+    :param percentile_discard: The percentile to discard symmetrically (i.e. a :param:percentile_discard of 5
+                discards points which fall into the first or last 1% of the data in the x, y, or z dimensions.
+    :return: outlier_mask, a [N,] boolean numpy array, where True values correspond to an outlying point
+    """
     # print(np.median(points, axis=1))
     # print(np.percentile(points, [0., 10., 25., 50., 75., 90., 100.], axis=1))
     limits = np.percentile(points, [float(percentile_discard), 100.0 - percentile_discard], axis=1)
@@ -125,10 +201,14 @@ def get_outlier_mask(points, percentile_discard):
 
 
 def gen_binned_points(points, detail=50, minpointcount=4):
+    """
+    Bin points from a point cloud, ignoring outliers
+    :param points: A [3, N] numpy array of points
+    :param detail: The bins per point cloud unit
+    :param minpointcount: Minimum number of points in a bin considered to generate a reliable mean
+    :return: binned_points, a [3,N] numpy array of the binned points
+    """
     logging.info("binning points shape: {}".format(points.shape))
-    # detail = bins per unit
-    # minpointcount = min number of points in a bin for that bin to be accepted
-
     orig_points_shape = points.shape
     points = points[:, get_outlier_mask(points, 1)]
     # points = points[:, get_outlier_mask(pointcloud.align_points_with_xy(points), 10)]
@@ -184,7 +264,14 @@ def gen_binned_points(points, detail=50, minpointcount=4):
 
 
 def generate_world_cloud(vid, K, fnums, avg_size=5):
-    # generate frame number pairs
+    """
+    Generate a point cloud from multiple video frames
+    :param vid: :class:video.Video object from which to take the frames
+    :param K: [3,3] Camera calibration matrix
+    :param fnums: An iterable of frame numbers from which to create the point cloud
+    :param avg_size: The number of frame-pairs to combine in a moving average
+    :return: points, a [3,N] numpy array of the triangulated points computed from the video
+    """
     fnumpairs = [(fnums[i], fnums[i+1]) for i in range(len(fnums)-1)]
     nregs = len(fnumpairs)
     if nregs < avg_size:
@@ -244,12 +331,17 @@ def generate_world_cloud(vid, K, fnums, avg_size=5):
     return avgpoints
 
 
-def bin_and_render(avgpoints, fname=None):
-    # bin, flatten, and render
-    print("Binning points")
-    world = gen_binned_points(avgpoints)
-    del avgpoints
-    pointcloud.visualise_heatmap(world, path=fname, mode='plain')
+def reconstruct_frame_pair(vid, K, f0, f1):
+    """
+    Legacy function to compute a reconstruction of the world from just two frames
+    :param vid: input video
+    :param K: camera calibration matrix
+    :param f0: First frame number
+    :param f1: Second frame number
+    """
+    cloud, vel = generate_frame_pair_cloud(vid, K, (f0, f1))
+    points = pointcloud.align_points_with_xy(cloud.points)
+    pointcloud.visualise_heatmap(points, fname="./output/{}_{}_single_pair".format(f0, f1))
 
 
 def _multiproc_process_frame_collection(vid_path, frames, K):
@@ -258,6 +350,18 @@ def _multiproc_process_frame_collection(vid_path, frames, K):
 
 
 def reconstruct_world(clip, K, frame_step, include_intermediates=False, multiproc=True):
+    """
+    Generate a filtered, averaged point cloud from a video.
+    :param clip: An instance of :class:`video.Clip` as the input video
+    :param K: [3,3] The camera calibration matrix
+    :param frame_step: The fixed step between frame numbers from which to determine pairs of frames to triangulate
+    :param include_intermediates: Boolean. When enabled, all frames are included in the reconstruction.
+        To illustrate, with a frame step of 3:
+            Disabled: result = function(f0->f3, f3->f6, f6->f9, etc)  # a single 'frame train'
+            Enabled:  result = function(f0->f3, f1->f4, f2->f5, f3->f6, f4->f7, f5->f8, etc)  # a multi 'frame train'
+    :param multiproc: Boolean. When enabled, reconstruction of each frame train is processed in parallel
+    :return: points, a [3,N] numpy array of x,y,z point coordinates of the reconstructed world
+    """
     frame_collection = tuple(
         range(clip.start_frame + offset, clip.stop_frame - (frame_step-offset), frame_step)
         for offset in range(frame_step if include_intermediates else 1)
@@ -297,23 +401,33 @@ def reconstruct_world(clip, K, frame_step, include_intermediates=False, multipro
     return gen_binned_points(points)
 
 
-def reconstruct_frame_pair(vid, K, f0, f1):
-    cloud, vel = generate_frame_pair_cloud(vid, K, (f0, f1))
-    cloud.points = pointcloud.align_points_with_xy(cloud.points)
-    pointcloud.visualise_worlds_mplotlib(cloud)
-    # pointcloud.visualise_heatmap(cloud.points, fname="./output/{}_{}_single_pair".format(f0, f1))
-
-
-def render_reconstruct_world(clip, K, frame_step, path=None, include_intermediates=False, multiproc=True):
+def render_reconstruct_world(clip, K, frame_step, path=None, include_intermediates=False, multiproc=True,
+                             render_mode='standard', render_scale=1, render_gsigma=0):
+    """
+    A helper wrapper function. **See documentation for :func:`reconstruction.reconstruct_world` and
+        :func:`pointcloud.visualise_heatmap` for detailed parameter documentation.**
+    :param clip: Input video clip
+    :param K: Camera calibration matrix
+    :param frame_step: Frame step
+    :param path: Output path
+    :param include_intermediates: Boolean to enable computation of mutiple frame trains
+    :param multiproc: Boolean to enable parallel frame train processing
+    :param render_mode: Mode to render with
+    :param render_scale: Scale to render with
+    :param render_gsigma: Level of Gaussian smoothing
+    :return: matplotlib figure
+    """
     world_points = reconstruct_world(clip=clip, K=K, frame_step=frame_step,
                                      include_intermediates=include_intermediates, multiproc=multiproc)
 
     save_path = '{base}_{start}_{stop}_{step}_{incl}'.format(
         base=path, start=clip.start_frame, stop=clip.stop_frame, step=frame_step,
         incl=('multitrain' if include_intermediates else 'singletrain')
-    )
+    ) if path is not None else None
 
-    return pointcloud.visualise_heatmap(world_points, path=save_path, mode='plain')
+    return pointcloud.visualise_heatmap(
+        world_points, path=save_path, mode=render_mode, scale=render_scale, gsigma=render_gsigma
+    )
 
 
 if __name__ == "__main__":

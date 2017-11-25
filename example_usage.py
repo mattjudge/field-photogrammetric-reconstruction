@@ -34,7 +34,9 @@ def clip_heatmap():
     )
 
     reconstruction.render_reconstruct_world(
-        clip, camera_proj_mat, frame_step=3, path='./output/', include_intermediates=True, multiproc=True)
+        clip, camera_proj_mat, frame_step=3, path='./output/', include_intermediates=True, multiproc=True,
+        render_mode='standard', render_scale=3.3, render_gsigma=1
+    )
 
     print("Done.")
 
