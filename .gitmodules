@@ -1,0 +1,3 @@
+[submodule "field_reconstruction/numpy_caching"]
+	path = field_reconstruction/numpy_caching
+	url = https://github.com/mattjudge/numpy_caching.git

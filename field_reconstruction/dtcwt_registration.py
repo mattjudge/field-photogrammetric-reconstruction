@@ -15,11 +15,12 @@ import dtcwt.registration as reg
 import numpy as np
 from dtcwt.numpy import Transform2d
 
-from field_reconstruction.caching import cache_numpy_result
+from field_reconstruction.numpy_caching import np_cache
 
 _transform2d = Transform2d()
 
 
+# @np_cache(True, hash_method='readable')
 def take_transform(vid, fnum):
     """
     Takes the DTCWT transform of a frame from a video
@@ -33,7 +34,7 @@ def take_transform(vid, fnum):
     return _transform2d.forward(frame, nlevels=7)
 
 
-@cache_numpy_result(False)
+@np_cache(False)
 def load_flow(vid, fnum1, fnum2):
     """
     Load the registration which maps frame 1 to frame 2 of a video.
@@ -46,7 +47,7 @@ def load_flow(vid, fnum1, fnum2):
     return reg.estimatereg(take_transform(vid, fnum1), take_transform(vid, fnum2))
 
 
-@cache_numpy_result(True, hash_method='readable')
+@np_cache(True, hash_method='readable')
 def load_velocity_fields(vid, fnum1, fnum2):
     """
     Load the velocity fields mapping frame 1 to frame 2 of a video

@@ -28,7 +28,7 @@ import cv2
 import numpy as np
 
 from field_reconstruction import dtcwt_registration, pointcloud, video
-from field_reconstruction.caching import cache_numpy_result
+from field_reconstruction.numpy_caching import np_cache
 
 
 def get_fundamental(u1, v1, u2, v2):
@@ -134,7 +134,7 @@ def estimate_projections(correspondences, K):
     return P1, P2, R, t
 
 
-@cache_numpy_result(True, hash_method='readable')
+@np_cache(True, hash_method='readable')
 def triangulate_frames(vid, frame_pair, K):
     """
     Perform point triangulation from two frames of a video
