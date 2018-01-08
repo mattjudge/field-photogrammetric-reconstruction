@@ -9,6 +9,7 @@ This module provides:
 """
 
 import logging
+from functools import lru_cache
 
 import cv2
 import dtcwt.registration as reg
@@ -20,7 +21,7 @@ from field_reconstruction.numpy_caching import np_cache
 _transform2d = Transform2d()
 
 
-# @np_cache(True, hash_method='readable')
+@lru_cache(8)
 def take_transform(vid, fnum):
     """
     Takes the DTCWT transform of a frame from a video
@@ -47,7 +48,7 @@ def load_flow(vid, fnum1, fnum2):
     return reg.estimatereg(take_transform(vid, fnum1), take_transform(vid, fnum2))
 
 
-@np_cache(True, hash_method='readable')
+@np_cache(False, hash_method='readable')
 def load_velocity_fields(vid, fnum1, fnum2):
     """
     Load the velocity fields mapping frame 1 to frame 2 of a video
@@ -58,7 +59,12 @@ def load_velocity_fields(vid, fnum1, fnum2):
     """
     # todo: don't upscale the flow to the full image size, since the velocity appears in blocks
     logging.debug('Computing velocities of frames {} & {}'.format(fnum1, fnum2))
-    return np.array(reg.velocityfield(load_flow(vid, fnum1, fnum2), vid.shape, method='nearest'))
+    avecs = load_flow(vid, fnum1, fnum2)
+    vel = np.array(reg.velocityfield(avecs, vid.shape, method='nearest'))
+    # scale to frame size
+    vel[0] *= vid.shape[1]
+    vel[1] *= vid.shape[0]
+    return vel
 
 
 if __name__ == '__main__':

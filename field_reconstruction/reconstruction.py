@@ -97,13 +97,12 @@ def create_pixel_correspondences(vel):
     velx, vely = vel
     imshape = velx.shape
     shapey, shapex = imshape
-    vely = vely.clip(-1, 0)  # todo: check expected limits
 
     X, Y = np.meshgrid(np.arange(shapex), np.arange(shapey))
 
     # velocity vectors map pixels in f2 to their locations in f1
-    u1shaped = X + velx*shapex
-    v1shaped = Y + vely*shapey
+    u1shaped = X + velx
+    v1shaped = Y + vely
     u2shaped, v2shaped = X, Y
 
     return np.dstack((u1shaped, v1shaped)), np.dstack((u2shaped, v2shaped))
@@ -306,10 +305,12 @@ def generate_world_cloud(vid, K, fnums, avg_size=5):
             moving_avg = np.zeros(cloudshape)
             for j in range(avg_size):
                 p = clouds[j].get_shaped()
-                mapX = (X + vels[j][0, :, :] * shapex).astype('float32')
-                mapY = (Y + vels[j][1, :, :] * shapey).astype('float32')
+                mapX = (X + vels[j][0, :, :]).astype('float32')
+                mapY = (Y + vels[j][1, :, :]).astype('float32')
                 moving_avg = p + cv2.remap(moving_avg, mapX, mapY, interpolation=cv2.INTER_LINEAR)
                 # try INTER_LANCZOS4, borderMode=cv2.BORDER_TRANSPARENT)
+                # dst(x,y) = src(map_x(x,y), map_y(x,y))
+
             moving_avg /= avg_size
 
             crop = 50
