@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import logging
 import numpy as np
 from field_reconstruction import video, reconstruction
 
@@ -21,9 +22,11 @@ def clip_heatmap():
          [0, 0, 1]]
     )
 
+    logging.root.setLevel(logging.DEBUG)
+
     reconstruction.render_reconstruct_world(
         clip, camera_proj_mat, frame_step=3, path='./output/', include_intermediates=False, multiproc=False,
-        render_mode='standard', render_scale=3.3, render_gsigma=1
+        render_mode='standard', render_scale=3.3, render_gsigma=8
     )
 
     print("Done.")

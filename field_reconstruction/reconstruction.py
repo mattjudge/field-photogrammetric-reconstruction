@@ -96,9 +96,10 @@ def create_pixel_correspondences(vel):
     """
     velx, vely = vel
     imshape = velx.shape
-    shapey, shapex = imshape
+    blocksize = 16  # registration on 16x16 blocks
+    shapey, shapex = imshape[0]*blocksize, imshape[1]*blocksize
 
-    X, Y = np.meshgrid(np.arange(shapex), np.arange(shapey))
+    X, Y = np.meshgrid(np.arange(shapex, step=blocksize), np.arange(shapey, step=blocksize))  # todo offset
 
     # velocity vectors map pixels in f2 to their locations in f1
     u1shaped = X + velx
@@ -128,12 +129,12 @@ def estimate_projections(correspondences, K):
     E, mask = cv2.findEssentialMat(w1.transpose(), w2.transpose(), K)
 
     # TODO: refine sampling method
-    retval, R, t, mask = cv2.recoverPose(E, w1[:, ::100].transpose(), w2[:, ::100].transpose(), K, mask=None)
+    retval, R, t, mask = cv2.recoverPose(E, w1.transpose(), w2.transpose(), K, mask=None)
     P1, P2 = get_projections_from_rt(K, R, t)
     return P1, P2, R, t
 
 
-@np_cache(True, hash_method='readable')
+@np_cache(True, hash_method='hash')
 def triangulate_frames(vid, frame_pair, K):
     """
     Perform point triangulation from two frames of a video
@@ -148,7 +149,7 @@ def triangulate_frames(vid, frame_pair, K):
       - P1, P2, R, t are the projection matrix parameters
                     returned by :func:`estimate_projections`)
     """
-    vel = dtcwt_registration.load_velocity_fields(vid, *frame_pair)[:, 50:-50, 50:-50]
+    vel = dtcwt_registration.load_velocity_fields(vid, *frame_pair)[:, 3:-3, 3:-3]
     corr1, corr2 = create_pixel_correspondences(vel)
     P1, P2, R, t = estimate_projections((corr1, corr2), K)
 
@@ -199,7 +200,7 @@ def get_outlier_mask(points, percentile_discard):
     return outlier_mask
 
 
-def gen_binned_points(points, detail=50, minpointcount=4):
+def gen_binned_points(points, detail=5, minpointcount=4):
     """
     Bin points from a point cloud, ignoring outliers
     :param points: A [3, N] numpy array of points
@@ -283,9 +284,10 @@ def generate_world_cloud(vid, K, fnums, avg_size=5):
     cloudshape = cloud0.get_shaped().shape
     del cloud0, vel0
 
-    shapey, shapex, _ = cloudshape
-    X, Y = np.meshgrid(np.arange(shapex, dtype=np.float32),
-                       np.arange(shapey, dtype=np.float32))
+    blocksize = 16  # registration on 16x16 blocks
+    shapey, shapex = cloudshape[0] * blocksize, cloudshape[1] * blocksize
+    X, Y = np.meshgrid(np.arange(shapex, step=blocksize, dtype=np.float32),
+                       np.arange(shapey, step=blocksize, dtype=np.float32))  # todo offset
 
     # generate moving average of clouds
     avgpoints = np.ndarray((3, 0))
@@ -305,20 +307,20 @@ def generate_world_cloud(vid, K, fnums, avg_size=5):
             moving_avg = np.zeros(cloudshape)
             for j in range(avg_size):
                 p = clouds[j].get_shaped()
-                mapX = (X + vels[j][0, :, :]).astype('float32')
-                mapY = (Y + vels[j][1, :, :]).astype('float32')
+                mapX = (X + vels[j][0, :, :]).astype('float32') / 16
+                mapY = (Y + vels[j][1, :, :]).astype('float32') / 16
                 moving_avg = p + cv2.remap(moving_avg, mapX, mapY, interpolation=cv2.INTER_LINEAR)
                 # try INTER_LANCZOS4, borderMode=cv2.BORDER_TRANSPARENT)
                 # dst(x,y) = src(map_x(x,y), map_y(x,y))
 
             moving_avg /= avg_size
 
-            crop = 50
-            avgcloudX = moving_avg[400:-crop, crop:-crop, 0]
-            avgcloudY = moving_avg[400:-crop, crop:-crop, 1]
-            avgcloudZ = moving_avg[400:-crop, crop:-crop, 2]
+            crop0, crop = 25, 3
+            avgcloudX = moving_avg[crop0:-crop, crop:-crop, 0]
+            avgcloudY = moving_avg[crop0:-crop, crop:-crop, 1]
+            avgcloudZ = moving_avg[crop0:-crop, crop:-crop, 2]
             avgcloudXYZ = np.vstack((avgcloudX.flat, avgcloudY.flat, avgcloudZ.flat))
-            # avgcloudXYZ = np.vstack((avg[:, :, 0].flat, avg[:, :, 1].flat, avg[:, :, 2].flat))
+            # avgcloudXYZ = np.vstack((moving_avg[:, :, 0].flat, moving_avg[:, :, 1].flat, moving_avg[:, :, 2].flat))
 
             # shift into global coordinates, trusting R and t from the projection matrices to be correct
             avgpoints = clouds[-1].R.dot(avgpoints) + clouds[-1].t  # shift the previous values into current space
@@ -386,9 +388,10 @@ def reconstruct_world(clip, K, frame_step, include_intermediates=False, multipro
         finalpair = frame_collection[-1][-2:]
         logging.debug("finalpair {}".format(finalpair))
 
-        vel = dtcwt_registration.load_velocity_fields(clip.video, *finalpair)[:, 50:-50, 50:-50]
+        vel = dtcwt_registration.load_velocity_fields(clip.video, *finalpair)[:, 3:-3, 3:-3]
 
         # Assume R = eye  # todo: cube root homogeneous matrix?
+        # avgpoints = clouds[-1].R.dot(avgpoints) + clouds[-1].t  # shift the previous values into current space
         corr = create_pixel_correspondences(vel)
         _, _, R, T = estimate_projections(corr, K)
         points = np.hstack((

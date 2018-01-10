@@ -60,7 +60,8 @@ def load_velocity_fields(vid, fnum1, fnum2):
     # todo: don't upscale the flow to the full image size, since the velocity appears in blocks
     logging.debug('Computing velocities of frames {} & {}'.format(fnum1, fnum2))
     avecs = load_flow(vid, fnum1, fnum2)
-    vel = np.array(reg.velocityfield(avecs, vid.shape, method='nearest'))
+    vel = np.array(reg.velocityfield(avecs, avecs.shape[:2], method='nearest'))
+    # assert np.array_equal(vel, np.array(reg.velocityfield(avecs, vid.shape, method='nearest'))[:, ::16, ::16])
     # scale to frame size
     vel[0] *= vid.shape[1]
     vel[1] *= vid.shape[0]
