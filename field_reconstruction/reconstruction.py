@@ -141,12 +141,12 @@ def triangulate_frames(vid, frame_pair, K):
     :param frame_pair: Tuple of two frame numbers (frame1, frame2)
     :param K: [3,3] Camera calibration matrix
     :returns: points, velocities, P1, P2, R, t
-        WHERE
-        points are a [3, N] numpy array point cloud
-        velocities are the velocities returned by the dtcwt transform
-            as a [2, Y, X] numpy array (see :func:`dtcwt_registration.load_velocity_fields`)
-        P1, P2, R, t are the projection matrix parameters
-                        returned by :func:`estimate_projections`)
+    WHERE
+      - points are a [3, N] numpy array point cloud
+      - velocities are the velocities returned by the dtcwt transform
+        as a [2, Y, X] numpy array (see :func:`dtcwt_registration.load_velocity_fields`)
+      - P1, P2, R, t are the projection matrix parameters
+                    returned by :func:`estimate_projections`)
     """
     vel = dtcwt_registration.load_velocity_fields(vid, *frame_pair)[:, 50:-50, 50:-50]
     corr1, corr2 = create_pixel_correspondences(vel)
@@ -167,10 +167,10 @@ def generate_frame_pair_cloud(vid, frame_pair, K):
     :param frame_pair: Tuple of two frame numbers (frame1, frame2)
     :param K: [3,3] Camera calibration matrix
     :return: pointcloud, velocities
-            WHERE
-            pointcloud is an instance of :class:`pointcloud.Pointcloud`
-            velocities are the velocities returned by the dtcwt transform
-                as a [2, Y, X] numpy array (see :func:`dtcwt_registration.load_velocity_fields`)
+    WHERE
+      - pointcloud is an instance of :class:`pointcloud.Pointcloud`
+      - velocities are the velocities returned by the dtcwt transform
+        as a [2, Y, X] numpy array (see :func:`dtcwt_registration.load_velocity_fields`)
     """
     points, vel, P1, P2, R, t = triangulate_frames(vid, frame_pair, K)
     imshape = vel.shape[1:]

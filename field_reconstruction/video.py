@@ -30,7 +30,7 @@ class Video:
             int(self.vidcap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
             int(self.vidcap.get(cv2.CAP_PROP_FRAME_WIDTH))
         )
-        self.frame_count = self.vidcap.get(cv2.CAP_PROP_FRAME_COUNT)
+        self.frame_count = int(self.vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     def __str__(self):
         return self.name
@@ -97,7 +97,8 @@ class Clip:
             self.stop_frame = self.video.frame_count
         elif stopframe > self.video.frame_count:
             raise IndexError("Clip must be within video length (stopframe value too large)")
-        self.stop_frame = stopframe  # stopframe is NOT included in the clip
+        else:
+            self.stop_frame = stopframe  # stopframe is NOT included in the clip
         self.frame_count = self.stop_frame - self.start_frame
 
     def get_frame_number(self, frame_number):
